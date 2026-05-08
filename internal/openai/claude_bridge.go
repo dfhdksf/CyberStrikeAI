@@ -499,6 +499,7 @@ func (c *Client) claudeChatCompletionStream(ctx context.Context, payload interfa
 
 	reader := bufio.NewReader(resp.Body)
 	var full strings.Builder
+	fullText := ""
 
 	for {
 		line, readErr := reader.ReadString('\n')
@@ -531,9 +532,14 @@ func (c *Client) claudeChatCompletionStream(ctx context.Context, payload interfa
 			if deltaType == "text_delta" {
 				text, _ := delta["text"].(string)
 				if text != "" {
-					full.WriteString(text)
+					var textOut string
+					fullText, textOut = normalizeStreamingDelta(fullText, text)
+					if textOut == "" {
+						continue
+					}
+					full.WriteString(textOut)
 					if onDelta != nil {
-						if err := onDelta(text); err != nil {
+						if err := onDelta(textOut); err != nil {
 							return full.String(), err
 						}
 					}
@@ -603,6 +609,7 @@ func (c *Client) claudeChatCompletionStreamWithToolCalls(
 
 	reader := bufio.NewReader(resp.Body)
 	var full strings.Builder
+	fullText := ""
 	finishReason := ""
 
 	// 追踪当前正在构建的 content blocks
@@ -665,9 +672,14 @@ func (c *Client) claudeChatCompletionStreamWithToolCalls(
 			if deltaType == "text_delta" {
 				text, _ := delta["text"].(string)
 				if text != "" {
-					full.WriteString(text)
+					var textOut string
+					fullText, textOut = normalizeStreamingDelta(fullText, text)
+					if textOut == "" {
+						continue
+					}
+					full.WriteString(textOut)
 					if onContentDelta != nil {
-						if err := onContentDelta(text); err != nil {
+						if err := onContentDelta(textOut); err != nil {
 							return full.String(), nil, finishReason, err
 						}
 					}

@@ -33,6 +33,38 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("openai api error: status=%d body=%s", e.StatusCode, e.Body)
 }
 
+// normalizeStreamingDelta 将可能是“累计片段/重发片段”的内容归一化为“纯增量”。
+// 部分兼容网关会返回累计 content；若直接 append 会出现重复文本（结巴）。
+func normalizeStreamingDelta(current, incoming string) (next, delta string) {
+	if incoming == "" {
+		return current, ""
+	}
+	if current == "" {
+		return incoming, incoming
+	}
+	if incoming == current {
+		return current, ""
+	}
+	if strings.HasPrefix(incoming, current) {
+		return incoming, incoming[len(current):]
+	}
+	if strings.HasSuffix(current, incoming) {
+		return current, ""
+	}
+
+	// 边界重叠：current 后缀与 incoming 前缀重合，仅追加非重叠部分。
+	max := len(current)
+	if len(incoming) < max {
+		max = len(incoming)
+	}
+	for overlap := max; overlap > 0; overlap-- {
+		if current[len(current)-overlap:] == incoming[:overlap] {
+			return current + incoming[overlap:], incoming[overlap:]
+		}
+	}
+	return current + incoming, incoming
+}
+
 // NewClient 创建一个新的OpenAI客户端。
 func NewClient(cfg *config.OpenAIConfig, httpClient *http.Client, logger *zap.Logger) *Client {
 	if httpClient == nil {
@@ -219,6 +251,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, payload interface{}, 
 
 	reader := bufio.NewReader(resp.Body)
 	var full strings.Builder
+	fullText := ""
 
 	// 典型 SSE 结构：
 	// data: {...}\n\n
@@ -263,9 +296,14 @@ func (c *Client) ChatCompletionStream(ctx context.Context, payload interface{}, 
 			continue
 		}
 
-		full.WriteString(delta)
+		var deltaOut string
+		fullText, deltaOut = normalizeStreamingDelta(fullText, delta)
+		if deltaOut == "" {
+			continue
+		}
+		full.WriteString(deltaOut)
 		if onDelta != nil {
-			if err := onDelta(delta); err != nil {
+			if err := onDelta(deltaOut); err != nil {
 				return full.String(), err
 			}
 		}
@@ -380,6 +418,7 @@ func (c *Client) ChatCompletionStreamWithToolCalls(
 
 	reader := bufio.NewReader(resp.Body)
 	var full strings.Builder
+	fullText := ""
 	finishReason := ""
 
 	for {
@@ -426,10 +465,14 @@ func (c *Client) ChatCompletionStreamWithToolCalls(
 			content = delta.Text
 		}
 		if content != "" {
-			full.WriteString(content)
-			if onContentDelta != nil {
-				if err := onContentDelta(content); err != nil {
-					return full.String(), nil, finishReason, err
+			var contentOut string
+			fullText, contentOut = normalizeStreamingDelta(fullText, content)
+			if contentOut != "" {
+				full.WriteString(contentOut)
+				if onContentDelta != nil {
+					if err := onContentDelta(contentOut); err != nil {
+						return full.String(), nil, finishReason, err
+					}
 				}
 			}
 		}
