@@ -18,7 +18,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// einoSummarizeUserInstruction 与单 Agent MemoryCompressor 目标一致：压缩时保留渗透关键信息。
+// einoSummarizeUserInstruction：压缩历史时保留渗透测试关键信息。
 const einoSummarizeUserInstruction = `在保持所有关键安全测试信息完整的前提下压缩对话历史。
 
 必须保留：已确认漏洞与攻击路径、工具输出中的核心发现、凭证与认证细节、架构与薄弱点、当前进度、失败尝试与死路、策略决策。
@@ -29,7 +29,7 @@ const einoSummarizeUserInstruction = `在保持所有关键安全测试信息完
 输出须使后续代理能无缝继续同一授权测试任务。`
 
 // newEinoSummarizationMiddleware 使用 Eino ADK Summarization 中间件（见 https://www.cloudwego.io/zh/docs/eino/core_modules/eino_adk/eino_adk_chatmodelagentmiddleware/middleware_summarization/）。
-// 触发阈值与单 Agent MemoryCompressor 一致：当估算 token 超过 openai.max_total_tokens 的 90% 时摘要。
+// 触发阈值：估算 token 超过 openai.max_total_tokens * summarization_trigger_ratio（默认 0.8）时摘要。
 func newEinoSummarizationMiddleware(
 	ctx context.Context,
 	summaryModel model.BaseChatModel,

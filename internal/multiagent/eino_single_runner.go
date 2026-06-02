@@ -26,7 +26,7 @@ import (
 const einoSingleAgentName = "cyberstrike-eino-single"
 
 // RunEinoSingleChatModelAgent 使用 Eino adk.NewChatModelAgent + adk.NewRunner.Run（官方 Quick Start 的 Query 同属 Runner API；此处用历史 + 用户消息切片等价于多轮 Query）。
-// 不替代既有原生 ReAct；与 RunDeepAgent 共享 runEinoADKAgentLoop 的 SSE 映射与 MCP 桥。
+// 与 RunDeepAgent 共享 runEinoADKAgentLoop 的 SSE 映射与 MCP 桥。
 func RunEinoSingleChatModelAgent(
 	ctx context.Context,
 	appCfg *config.Config,
