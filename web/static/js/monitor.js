@@ -1784,6 +1784,21 @@ function handleStreamEvent(event, progressElement, progressId,
             break;
         }
 
+        case 'eino_empty_response_continue': {
+            const d = event.data || {};
+            const title = typeof window.t === 'function'
+                ? window.t('chat.einoEmptyResponseContinueTitle')
+                : '🔁 自动续跑（无助手正文）';
+            addTimelineItem(timeline, 'warning', {
+                title: title,
+                message: event.message || (typeof window.t === 'function'
+                    ? window.t('chat.einoEmptyResponseContinueMessage')
+                    : '会话已结束但未捕获到助手正文，正在基于轨迹自动续跑…'),
+                data: d
+            });
+            break;
+        }
+
         case 'eino_run_retry': {
             const d = event.data || {};
             const title = typeof window.t === 'function'

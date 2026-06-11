@@ -489,6 +489,8 @@
     "einoStreamErrorTitle": "⚠️ Eino 流式中断（{{agent}}）",
     "einoStreamErrorMessage": "流式读取异常，系统将按策略重试或结束。",
     "einoRunRetryTitle": "🔁 临时错误重试",
+    "einoEmptyResponseContinueTitle": "🔁 自动续跑（无助手正文）",
+    "einoEmptyResponseContinueMessage": "会话已结束但未捕获到助手正文，正在基于轨迹自动续跑…",
     "einoRunRetryErrorDetail": "具体报错",
     "iterationLimitReachedTitle": "⛔ 达到迭代上限",
     "iterationLimitReachedMessage": "已达到最大迭代次数，任务已停止继续自动迭代。",

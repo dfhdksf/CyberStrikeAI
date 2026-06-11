@@ -2384,6 +2384,10 @@ function renderProcessDetails(messageId, processDetails) {
             itemTitle = agPx + execLine;
         } else if (eventType === 'eino_agent_reply') {
             itemTitle = agPx + '💬 ' + (typeof window.t === 'function' ? window.t('chat.einoAgentReplyTitle') : '子代理回复');
+        } else if (eventType === 'eino_empty_response_continue') {
+            itemTitle = typeof window.t === 'function'
+                ? window.t('chat.einoEmptyResponseContinueTitle')
+                : '🔁 自动续跑（无助手正文）';
         } else if (eventType === 'eino_run_retry') {
             itemTitle = typeof window.t === 'function'
                 ? window.t('chat.einoRunRetryTitle')

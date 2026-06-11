@@ -501,6 +501,8 @@
     "einoStreamErrorTitle": "⚠️ Eino stream interrupted ({{agent}})",
     "einoStreamErrorMessage": "Streaming read failed; the system will retry or terminate according to policy.",
     "einoRunRetryTitle": "🔁 Transient error retry",
+    "einoEmptyResponseContinueTitle": "🔁 Auto resume (no assistant text)",
+    "einoEmptyResponseContinueMessage": "Session ended without captured assistant text; resuming from trace…",
     "einoRunRetryErrorDetail": "Error detail",
     "iterationLimitReachedTitle": "⛔ Iteration limit reached",
     "iterationLimitReachedMessage": "Maximum iteration count reached; automatic iteration has stopped.",
