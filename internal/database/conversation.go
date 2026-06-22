@@ -585,12 +585,14 @@ func (db *DB) DeleteConversation(id string) error {
 		// 不返回错误，继续删除对话
 	}
 
+	projectID, _ := db.GetConversationProjectID(id)
+
 	// 删除对话（外键CASCADE会自动删除其他相关数据）
 	_, err = db.Exec("DELETE FROM conversations WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("删除对话失败: %w", err)
 	}
-	db.removeConversationScopedDirs(id)
+	db.removeConversationScopedDirs(id, projectID)
 
 	db.logger.Info("对话已删除（漏洞记录已保留）", zap.String("conversationId", id))
 	return nil
@@ -628,13 +630,35 @@ func (db *DB) removeConversationScopedDir(base, conversationID, label string) {
 	}
 }
 
-func (db *DB) removeConversationScopedDirs(conversationID string) {
-	// summarization transcript, reduction files, etc.
+func (db *DB) einoReductionBaseDir() string {
+	if db == nil {
+		return ""
+	}
+	if base := strings.TrimSpace(db.einoReductionRootDir); base != "" {
+		return base
+	}
+	return filepath.Join("tmp", "reduction")
+}
+
+func (db *DB) removeConversationScopedDirs(conversationID, projectID string) {
+	// summarization transcript, etc.
 	db.removeConversationScopedDir(db.conversationArtifactsDir, conversationID, "conversation_artifacts")
 	// Eino plantask JSON boards (skills_dir/.eino/plantask/<id>/).
 	db.removeConversationScopedDir(db.einoPlantaskBaseDir, conversationID, "plantask")
 	// Eino ADK runner checkpoints (checkpoint_dir/<id>/).
 	db.removeConversationScopedDir(db.einoCheckpointBaseDir, conversationID, "eino_checkpoint")
+	// Eino reduction persisted tool outputs (tmp/reduction/conversations/<id>/).
+	// Project-bound sessions share projects/<id>/ — skip on single conversation delete.
+	if strings.TrimSpace(projectID) == "" {
+		reductionBase := filepath.Join(db.einoReductionBaseDir(), "conversations")
+		db.removeConversationScopedDir(reductionBase, conversationID, "reduction")
+	}
+}
+
+func (db *DB) removeProjectScopedDirs(projectID string) {
+	// Eino reduction persisted tool outputs (tmp/reduction/projects/<id>/).
+	reductionBase := filepath.Join(db.einoReductionBaseDir(), "projects")
+	db.removeConversationScopedDir(reductionBase, projectID, "reduction")
 }
 
 // SaveAgentTrace 保存最后一轮代理消息轨迹与助手输出摘要。
