@@ -7330,6 +7330,11 @@ async function renameConversation() {
             }
         }
 
+        // 同步更新顶栏正在运行的任务名称
+        if (typeof updateActiveTaskConversationTitle === 'function') {
+            updateActiveTaskConversationTitle(convId, newTitle.trim());
+        }
+
         // 重新加载对话列表
         loadConversationsWithGroups();
     } catch (error) {

@@ -181,7 +181,7 @@ function updateCompletedTasksHistory(currentTasks) {
             
             tasksState.completedTasksHistory.push({
                 conversationId: task.conversationId,
-                message: task.message || '未命名任务',
+                message: task.title || task.message || '未命名任务',
                 startedAt: task.startedAt,
                 status: finalStatus,
                 completedAt: new Date().toISOString()
@@ -537,7 +537,7 @@ function renderTaskItem(task, statusMap, isHistory = false) {
                     ` : '<div class="task-checkbox-placeholder"></div>'}
                     <span class="task-status ${status.class}">${status.text}</span>
                     ${isHistory ? '<span class="task-history-badge" title="' + _t('tasks.historyBadge') + '">📜</span>' : ''}
-                    <span class="task-message" title="${escapeHtml(task.message || _t('tasks.unnamedTask'))}">${escapeHtml(task.message || _t('tasks.unnamedTask'))}</span>
+                    <span class="task-message" title="${escapeHtml((task.title || task.message || _t('tasks.unnamedTask')))}">${escapeHtml((task.title || task.message || _t('tasks.unnamedTask')))}</span>
                 </div>
                 <div class="task-actions">
                     ${duration ? `<span class="task-duration" title="${_t('tasks.duration')}">⏱ ${duration}</span>` : ''}

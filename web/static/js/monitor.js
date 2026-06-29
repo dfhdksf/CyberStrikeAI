@@ -3440,6 +3440,28 @@ async function loadActiveTasks(showErrors = false) {
     }
 }
 
+function getActiveTaskDisplayName(task) {
+    const _t = function (k) { return typeof window.t === 'function' ? window.t(k) : k; };
+    const unnamedTaskText = _t('tasks.unnamedTask');
+    if (!task) return unnamedTaskText;
+    const title = (task.title || '').trim();
+    if (title) return title;
+    const message = (task.message || '').trim();
+    return message || unnamedTaskText;
+}
+
+function updateActiveTaskConversationTitle(conversationId, newTitle) {
+    const bar = document.getElementById('active-tasks-bar');
+    if (!bar || !conversationId) return;
+    const title = (newTitle || '').trim();
+    if (!title) return;
+    bar.querySelectorAll('.active-task-item[data-conversation-id="' + conversationId + '"] .active-task-message')
+        .forEach(function (el) {
+            el.textContent = title;
+        });
+}
+window.updateActiveTaskConversationTitle = updateActiveTaskConversationTitle;
+
 function renderActiveTasks(tasks) {
     const bar = document.getElementById('active-tasks-bar');
     if (!bar) return;
@@ -3500,13 +3522,17 @@ function renderActiveTasks(tasks) {
         };
         const statusText = statusMap[task.status] || _t('tasks.statusRunning');
         const isFinalStatus = ['failed', 'timeout', 'cancelled', 'completed'].includes(task.status);
-        const unnamedTaskText = _t('tasks.unnamedTask');
+        const taskDisplayName = getActiveTaskDisplayName(task);
         const stopTaskBtnText = _t('tasks.stopTask');
+
+        if (task && task.conversationId) {
+            item.dataset.conversationId = task.conversationId;
+        }
 
         item.innerHTML = `
             <div class="active-task-info">
                 <span class="active-task-status">${statusText}</span>
-                <span class="active-task-message">${escapeHtml(task.message || unnamedTaskText)}</span>
+                <span class="active-task-message">${escapeHtml(taskDisplayName)}</span>
             </div>
             <div class="active-task-actions">
                 ${timeText ? `<span class="active-task-time">${timeText}</span>` : ''}
