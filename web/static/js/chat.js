@@ -6621,10 +6621,15 @@ function renderConversationsPagination(visibleCount) {
 }
 
 function goConversationsPage(page) {
-    const next = Math.min(Math.max(1, page), getConversationsTotalPages());
-    const scrollToTop = next !== conversationsPagination.page;
-    conversationsPagination.page = next;
-    loadConversationsWithGroups(conversationsSearchQuery, { refreshMeta: false, scrollToTop });
+    const requestedPage = Math.max(1, parseInt(page, 10) || 1);
+    const scrollToTop = requestedPage !== conversationsPagination.page;
+    conversationsPagination.page = requestedPage;
+    // intentPage：用户主动翻页，不在此处用可能已被并发刷新污染的 total 做钳制
+    loadConversationsWithGroups(conversationsSearchQuery, {
+        refreshMeta: false,
+        scrollToTop,
+        intentPage: requestedPage,
+    });
 }
 
 function changeConversationsPageSize() {
@@ -6737,12 +6742,17 @@ async function loadGroups() {
 async function loadConversationsWithGroups(searchQuery = '', options = {}) {
     const refreshMeta = options.refreshMeta !== false;
     const scrollToTop = options.scrollToTop === true;
+    const intentPage = Number.isFinite(options.intentPage) ? options.intentPage : null;
     const loadSeq = ++conversationsListLoadSeq;
     try {
         conversationsSearchQuery = searchQuery || '';
-        conversationsPagination.pageSize = getConversationsPageSize();
-        const pageSize = conversationsPagination.pageSize;
-        const offset = (conversationsPagination.page - 1) * pageSize;
+        const pageSize = getConversationsPageSize();
+        conversationsPagination.pageSize = pageSize;
+        const activePage = intentPage != null ? intentPage : conversationsPagination.page;
+        if (intentPage != null) {
+            conversationsPagination.page = intentPage;
+        }
+        const offset = (activePage - 1) * pageSize;
         const convParams = new URLSearchParams({ limit: String(pageSize), offset: String(offset) });
         if (conversationSortBy === 'created_at') {
             convParams.set('sort_by', 'created_at');
@@ -6789,10 +6799,24 @@ async function loadConversationsWithGroups(searchQuery = '', options = {}) {
         const data = await response.json();
         if (loadSeq !== conversationsListLoadSeq) return;
         const parsed = parseConversationsListResponse(data);
-        conversationsPagination.total = await resolveConversationsListTotal(convParams, parsed, pageSize, offset);
+        const resolvedTotal = await resolveConversationsListTotal(convParams, parsed, pageSize, offset);
         if (loadSeq !== conversationsListLoadSeq) return;
+        conversationsPagination.total = resolvedTotal;
 
-        if (clampConversationsPageToTotal()) {
+        const totalPages = getConversationsTotalPages();
+        if (activePage > totalPages) {
+            conversationsPagination.page = totalPages;
+            if (loadSeq !== conversationsListLoadSeq) return;
+            loadConversationsWithGroups(searchQuery, {
+                ...options,
+                intentPage: null,
+                scrollToTop: options.scrollToTop === true || activePage !== totalPages,
+            });
+            return;
+        }
+        conversationsPagination.page = activePage;
+        if (intentPage == null && clampConversationsPageToTotal()) {
+            if (loadSeq !== conversationsListLoadSeq) return;
             loadConversationsWithGroups(searchQuery, options);
             return;
         }
