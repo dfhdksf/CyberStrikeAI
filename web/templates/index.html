@@ -4385,11 +4385,11 @@
                 </div>
                 <div class="form-group">
                     <label for="vulnerability-title"><span data-i18n="vulnerabilityModal.title">标题</span> <span style="color: red;">*</span></label>
-                    <input type="text" id="vulnerability-title" data-i18n="vulnerabilityModal.titlePlaceholder" data-i18n-attr="placeholder" placeholder="漏洞标题" required />
+                    <input type="text" id="vulnerability-title" data-i18n="vulnerabilityModal.titlePlaceholder" data-i18n-attr="placeholder" placeholder="/api/login 存在 SQL 注入" required />
                 </div>
                 <div class="form-group">
-                    <label for="vulnerability-description" data-i18n="vulnerabilityModal.description">描述</label>
-                    <textarea id="vulnerability-description" rows="5" data-i18n="vulnerabilityModal.descriptionPlaceholder" data-i18n-attr="placeholder" placeholder="漏洞详细描述"></textarea>
+                    <label for="vulnerability-description"><span data-i18n="vulnerabilityModal.description">描述</span> <span style="color: red;">*</span></label>
+                    <textarea id="vulnerability-description" rows="7" data-i18n="vulnerabilityModal.descriptionPlaceholder" data-i18n-attr="placeholder" placeholder="建议包含：摘要、测试环境与范围、前置条件、复现步骤、预期结果、实际结果。"></textarea>
                 </div>
                 <div class="form-group">
                     <label for="vulnerability-severity"><span data-i18n="vulnerabilityModal.severity">严重程度</span> <span style="color: red;">*</span></label>
@@ -4413,24 +4413,36 @@
                     </select>
                 </div>
                 <div class="form-group">
-                    <label for="vulnerability-type" data-i18n="vulnerabilityModal.type">漏洞类型</label>
+                    <label for="vulnerability-type"><span data-i18n="vulnerabilityModal.type">漏洞类型</span> <span style="color: red;">*</span></label>
                     <input type="text" id="vulnerability-type" data-i18n="vulnerabilityModal.typePlaceholder" data-i18n-attr="placeholder" placeholder="如：SQL注入、XSS、CSRF等" />
                 </div>
                 <div class="form-group">
-                    <label for="vulnerability-target" data-i18n="vulnerabilityModal.target">目标</label>
-                    <input type="text" id="vulnerability-target" data-i18n="vulnerabilityModal.targetPlaceholder" data-i18n-attr="placeholder" placeholder="受影响的目标（URL、IP地址等）" />
+                    <label for="vulnerability-target"><span data-i18n="vulnerabilityModal.target">目标</span> <span style="color: red;">*</span></label>
+                    <input type="text" id="vulnerability-target" data-i18n="vulnerabilityModal.targetPlaceholder" data-i18n-attr="placeholder" placeholder="精确到 URL/IP:端口/接口路径/参数名" />
                 </div>
                 <div class="form-group">
-                    <label for="vulnerability-proof" data-i18n="vulnerabilityModal.proof">证明（POC）</label>
-                    <textarea id="vulnerability-proof" rows="5" data-i18n="vulnerabilityModal.proofPlaceholder" data-i18n-attr="placeholder" placeholder="漏洞证明，如请求/响应、截图等"></textarea>
+                    <label for="vulnerability-preconditions" data-i18n="vulnerabilityModal.preconditions">前置条件</label>
+                    <textarea id="vulnerability-preconditions" rows="3" data-i18n="vulnerabilityModal.preconditionsPlaceholder" data-i18n-attr="placeholder" placeholder="登录状态、权限、账号、Header/Cookie、特定数据、环境/版本；无则写无。"></textarea>
                 </div>
                 <div class="form-group">
-                    <label for="vulnerability-impact" data-i18n="vulnerabilityModal.impact">影响</label>
-                    <textarea id="vulnerability-impact" rows="3" data-i18n="vulnerabilityModal.impactPlaceholder" data-i18n-attr="placeholder" placeholder="漏洞影响说明"></textarea>
+                    <label for="vulnerability-reproduction-steps"><span data-i18n="vulnerabilityModal.reproductionSteps">复现步骤</span> <span style="color: red;">*</span></label>
+                    <textarea id="vulnerability-reproduction-steps" rows="6" data-i18n="vulnerabilityModal.reproductionStepsPlaceholder" data-i18n-attr="placeholder" placeholder="按 1/2/3 编号，写清入口、参数、payload、执行命令、观察点。"></textarea>
                 </div>
                 <div class="form-group">
-                    <label for="vulnerability-recommendation" data-i18n="vulnerabilityModal.recommendation">修复建议</label>
-                    <textarea id="vulnerability-recommendation" rows="3" data-i18n="vulnerabilityModal.recommendationPlaceholder" data-i18n-attr="placeholder" placeholder="修复建议"></textarea>
+                    <label for="vulnerability-evidence"><span data-i18n="vulnerabilityModal.evidence">证据 / POC</span> <span style="color: red;">*</span></label>
+                    <textarea id="vulnerability-evidence" rows="8" data-i18n="vulnerabilityModal.evidencePlaceholder" data-i18n-attr="placeholder" placeholder="原始请求/响应、curl/工具命令、截图说明、日志、DNSLog/回连记录、数据库结果、文件路径、时间戳等。"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="vulnerability-impact"><span data-i18n="vulnerabilityModal.impact">影响</span> <span style="color: red;">*</span></label>
+                    <textarea id="vulnerability-impact" rows="3" data-i18n="vulnerabilityModal.impactPlaceholder" data-i18n-attr="placeholder" placeholder="结合已验证事实说明实际影响，例如越权读取哪些数据。"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="vulnerability-recommendation"><span data-i18n="vulnerabilityModal.recommendation">修复建议</span> <span style="color: red;">*</span></label>
+                    <textarea id="vulnerability-recommendation" rows="3" data-i18n="vulnerabilityModal.recommendationPlaceholder" data-i18n-attr="placeholder" placeholder="写具体修复点和复测标准。"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="vulnerability-retest-notes" data-i18n="vulnerabilityModal.retestNotes">复测方式</label>
+                    <textarea id="vulnerability-retest-notes" rows="3" data-i18n="vulnerabilityModal.retestNotesPlaceholder" data-i18n-attr="placeholder" placeholder="修复后如何验证漏洞已关闭，包括应返回的状态码、错误信息或访问控制结果。"></textarea>
                 </div>
             </div>
             <div class="modal-footer">

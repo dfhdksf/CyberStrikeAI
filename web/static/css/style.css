@@ -21370,6 +21370,13 @@ tr.mcp-stats-tool-row[data-tool-name]:focus-visible {
     flex: 1;
 }
 
+.vulnerability-repro {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.vulnerability-section,
 .vulnerability-proof,
 .vulnerability-impact,
 .vulnerability-recommendation {
@@ -21379,6 +21386,10 @@ tr.mcp-stats-tool-row[data-tool-name]:focus-visible {
     border-radius: 6px;
     font-size: 0.875rem;
     line-height: 1.6;
+}
+
+.vulnerability-section:first-child {
+    margin-top: 0;
 }
 
 .vulnerability-proof pre {
@@ -21394,6 +21405,27 @@ tr.mcp-stats-tool-row[data-tool-name]:focus-visible {
     word-wrap: break-word;
 }
 
+.vulnerability-section-body {
+    margin-top: 8px;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.vulnerability-section-body--code {
+    margin-top: 8px;
+    padding: 12px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    overflow-x: auto;
+    font-size: 0.8rem;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.vulnerability-section strong,
 .vulnerability-proof strong,
 .vulnerability-impact strong,
 .vulnerability-recommendation strong {
