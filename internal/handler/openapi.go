@@ -506,7 +506,7 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 				},
 				"CreateVulnerabilityRequest": map[string]interface{}{
 					"type":     "object",
-					"required": []string{"conversation_id", "title", "severity"},
+					"required": []string{"conversation_id", "title", "description", "severity", "type", "target", "reproduction_steps", "evidence", "impact", "recommendation"},
 					"properties": map[string]interface{}{
 						"conversation_id": map[string]interface{}{
 							"type":        "string",
@@ -538,10 +538,9 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 							"type":        "string",
 							"description": "受影响的目标",
 						},
-						"proof": map[string]interface{}{
-							"type":        "string",
-							"description": "漏洞证明",
-						},
+						"preconditions":      map[string]interface{}{"type": "string", "description": "前置条件"},
+						"reproduction_steps": map[string]interface{}{"type": "string", "description": "复现步骤"},
+						"evidence":           map[string]interface{}{"type": "string", "description": "证据/POC，包含请求响应、命令输出、截图说明、日志等"},
 						"impact": map[string]interface{}{
 							"type":        "string",
 							"description": "影响",
@@ -550,6 +549,7 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 							"type":        "string",
 							"description": "修复建议",
 						},
+						"retest_notes": map[string]interface{}{"type": "string", "description": "复测方式"},
 					},
 				},
 				"UpdateVulnerabilityRequest": map[string]interface{}{
@@ -581,10 +581,9 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 							"type":        "string",
 							"description": "受影响的目标",
 						},
-						"proof": map[string]interface{}{
-							"type":        "string",
-							"description": "漏洞证明",
-						},
+						"preconditions":      map[string]interface{}{"type": "string", "description": "前置条件"},
+						"reproduction_steps": map[string]interface{}{"type": "string", "description": "复现步骤"},
+						"evidence":           map[string]interface{}{"type": "string", "description": "证据/POC，包含请求响应、命令输出、截图说明、日志等"},
 						"impact": map[string]interface{}{
 							"type":        "string",
 							"description": "影响",
@@ -593,6 +592,7 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 							"type":        "string",
 							"description": "修复建议",
 						},
+						"retest_notes": map[string]interface{}{"type": "string", "description": "复测方式"},
 					},
 				},
 				"ListVulnerabilitiesResponse": map[string]interface{}{
@@ -805,18 +805,18 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 					"type":        "object",
 					"description": "视觉分析（analyze_image MCP 工具）；enabled 且 model 非空时注册工具",
 					"properties": map[string]interface{}{
-						"enabled":                      map[string]interface{}{"type": "boolean", "description": "是否启用 analyze_image"},
-						"model":                        map[string]interface{}{"type": "string", "description": "视觉模型名（必填）", "example": "qwen-vl-max"},
-						"api_key":                      map[string]interface{}{"type": "string", "description": "API Key；留空复用 openai.api_key"},
-						"base_url":                     map[string]interface{}{"type": "string", "description": "Base URL；留空复用 openai.base_url"},
-						"provider":                     map[string]interface{}{"type": "string", "description": "提供商；留空复用 openai.provider"},
-						"timeout_seconds":              map[string]interface{}{"type": "integer", "description": "VL 调用超时（秒）"},
-						"max_image_bytes":              map[string]interface{}{"type": "integer", "description": "原始文件大小上限（字节）"},
-						"max_dimension":                map[string]interface{}{"type": "integer", "description": "长边缩放像素"},
-						"jpeg_quality":                 map[string]interface{}{"type": "integer", "description": "JPEG 质量 60-100"},
-						"max_payload_bytes":            map[string]interface{}{"type": "integer", "description": "送 API 体积上限（字节）"},
-						"skip_preprocess_below_bytes":  map[string]interface{}{"type": "integer", "description": "低于该字节且尺寸合规时可原图直传；0=始终压缩"},
-						"detail": map[string]interface{}{"type": "string", "enum": []string{"low", "high", "auto"}, "description": "OpenAI 兼容 image detail"},
+						"enabled":                     map[string]interface{}{"type": "boolean", "description": "是否启用 analyze_image"},
+						"model":                       map[string]interface{}{"type": "string", "description": "视觉模型名（必填）", "example": "qwen-vl-max"},
+						"api_key":                     map[string]interface{}{"type": "string", "description": "API Key；留空复用 openai.api_key"},
+						"base_url":                    map[string]interface{}{"type": "string", "description": "Base URL；留空复用 openai.base_url"},
+						"provider":                    map[string]interface{}{"type": "string", "description": "提供商；留空复用 openai.provider"},
+						"timeout_seconds":             map[string]interface{}{"type": "integer", "description": "VL 调用超时（秒）"},
+						"max_image_bytes":             map[string]interface{}{"type": "integer", "description": "原始文件大小上限（字节）"},
+						"max_dimension":               map[string]interface{}{"type": "integer", "description": "长边缩放像素"},
+						"jpeg_quality":                map[string]interface{}{"type": "integer", "description": "JPEG 质量 60-100"},
+						"max_payload_bytes":           map[string]interface{}{"type": "integer", "description": "送 API 体积上限（字节）"},
+						"skip_preprocess_below_bytes": map[string]interface{}{"type": "integer", "description": "低于该字节且尺寸合规时可原图直传；0=始终压缩"},
+						"detail":                      map[string]interface{}{"type": "string", "enum": []string{"low", "high", "auto"}, "description": "OpenAI 兼容 image detail"},
 					},
 				},
 				"AnalyzeImageToolCall": map[string]interface{}{
@@ -1432,7 +1432,7 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 						{
 							"name": "id", "in": "path", "required": true,
 							"description": "对话ID",
-							"schema": map[string]interface{}{"type": "string"},
+							"schema":      map[string]interface{}{"type": "string"},
 						},
 					},
 					"requestBody": map[string]interface{}{
@@ -2570,7 +2570,7 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 						"content": map[string]interface{}{
 							"application/json": map[string]interface{}{
 								"schema": map[string]interface{}{
-									"type": "object",
+									"type":     "object",
 									"required": []string{"source_fact_key", "target_fact_key", "edge_type"},
 									"properties": map[string]interface{}{
 										"source_fact_key": map[string]interface{}{"type": "string"},
