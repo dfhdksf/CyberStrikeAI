@@ -2583,11 +2583,11 @@
                         </aside>
                         <main class="workflow-main">
                             <section class="workflow-meta-bar">
-                                <div class="workflow-meta-fields">
-                                    <label><span data-i18n="workflows.metaId">ID</span> <input type="text" id="workflow-id" placeholder="web-scan-basic" autocomplete="off"></label>
-                                    <label><span data-i18n="workflows.metaName">名称</span> <input type="text" id="workflow-name" data-i18n="workflows.namePlaceholder" data-i18n-attr="placeholder" placeholder="基础 Web 扫描" autocomplete="off"></label>
-                                    <label><span data-i18n="workflows.metaDescription">描述</span> <input type="text" id="workflow-description" data-i18n="workflows.descriptionPlaceholder" data-i18n-attr="placeholder" placeholder="可选" autocomplete="off"></label>
-                                    <label class="workflow-enabled-toggle"><input type="checkbox" id="workflow-enabled" checked> <span data-i18n="workflows.metaEnabled">启用</span></label>
+                                <div class="workflow-canvas-header">
+                                    <div class="workflow-canvas-heading">
+                                        <h3 id="workflow-canvas-title" class="workflow-canvas-title" data-i18n="workflows.untitled">未命名流程</h3>
+                                        <span id="workflow-canvas-subtitle" class="workflow-canvas-subtitle" hidden></span>
+                                    </div>
                                 </div>
                                 <div class="workflow-toolbar">
                                     <button class="btn-secondary btn-small" type="button" onclick="toggleWorkflowConnectMode()" id="workflow-connect-btn" data-i18n="workflows.connect">连线</button>
@@ -4037,6 +4037,44 @@
             window.ELK = elk;
         }
     </script>
+    <!-- 图编排流程信息 -->
+    <div id="workflow-meta-modal" class="modal" style="display: none;">
+        <div class="modal-content workflow-meta-modal-content">
+            <div class="modal-header workflow-meta-modal-header">
+                <h2 data-i18n="workflows.metaModalTitle">流程信息</h2>
+                <span class="modal-close" onclick="closeWorkflowMetaModal()">&times;</span>
+            </div>
+            <div class="modal-body workflow-meta-modal-body">
+                <div class="form-group workflow-meta-field">
+                    <label for="workflow-name"><span data-i18n="workflows.metaName">名称</span> <span class="form-required">*</span></label>
+                    <input type="text" id="workflow-name" class="form-input" data-i18n="workflows.namePlaceholder" data-i18n-attr="placeholder" placeholder="基础 Web 扫描" autocomplete="off">
+                </div>
+                <div class="form-group workflow-meta-field workflow-meta-id-group" id="workflow-meta-id-group">
+                    <label for="workflow-id"><span data-i18n="workflows.metaId">ID</span> <span class="form-required">*</span></label>
+                    <div id="workflow-id-locked" class="workflow-meta-id-locked" hidden>
+                        <code id="workflow-id-display"></code>
+                    </div>
+                    <input type="text" id="workflow-id" class="form-input workflow-meta-id-input" placeholder="web-scan-basic" autocomplete="off">
+                    <small class="workflow-meta-id-hint form-hint" data-i18n="workflows.metaIdHint">创建后不可修改，用于 API 与角色绑定</small>
+                </div>
+                <div class="form-group workflow-meta-field">
+                    <label for="workflow-description" data-i18n="workflows.metaDescription">描述</label>
+                    <input type="text" id="workflow-description" class="form-input" data-i18n="workflows.descriptionPlaceholder" data-i18n-attr="placeholder" placeholder="可选" autocomplete="off">
+                </div>
+                <div class="workflow-meta-enable-row">
+                    <span class="workflow-meta-enable-label" data-i18n="workflows.metaEnabled">启用</span>
+                    <label class="workflow-switch workflow-switch--modal" data-i18n="workflows.metaEnabledHint" data-i18n-attr="title" title="禁用后无法被角色自动触发">
+                        <input type="checkbox" id="workflow-enabled" checked>
+                        <span class="workflow-switch-slider" aria-hidden="true"></span>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer workflow-meta-modal-footer">
+                <button type="button" class="btn-secondary btn-small" onclick="closeWorkflowMetaModal()" data-i18n="common.cancel">取消</button>
+                <button type="button" class="btn-primary btn-small" onclick="applyWorkflowMetaModal()" data-i18n="common.confirm">确认</button>
+            </div>
+        </div>
+    </div>
     <!-- 知识项编辑模态框 -->
     <!-- Skill模态框 -->
     <div id="skill-modal" class="modal">

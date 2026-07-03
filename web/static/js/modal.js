@@ -13,6 +13,7 @@
         'agent-md-modal',
         'batch-manage-modal',
         'create-group-modal',
+        'workflow-meta-modal',
         'login-overlay',
     ]);
 

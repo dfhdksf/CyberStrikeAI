@@ -45,6 +45,8 @@
 
     const AGENT_MODES = ['eino_single', 'deep', 'plan_execute', 'supervisor'];
 
+    const WORKFLOW_EDIT_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+
     function esc(text) {
         if (typeof escapeHtml === 'function') return escapeHtml(text == null ? '' : String(text));
         return String(text == null ? '' : text)
@@ -191,6 +193,19 @@
         empty.style.display = cy.nodes().length ? 'none' : 'flex';
     }
 
+    let workflowResizeObserver = null;
+
+    function setupWorkflowResizeObserver(container) {
+        if (workflowResizeObserver || typeof ResizeObserver === 'undefined' || !container) return;
+        workflowResizeObserver = new ResizeObserver(function () {
+            if (cy) cy.resize();
+        });
+        const canvasWrap = container.closest('.workflow-canvas-wrap');
+        const pageContent = container.closest('.workflow-page-content');
+        if (canvasWrap) workflowResizeObserver.observe(canvasWrap);
+        if (pageContent) workflowResizeObserver.observe(pageContent);
+    }
+
     function initCy() {
         const container = document.getElementById('workflow-canvas');
         if (!container || typeof cytoscape !== 'function') return;
@@ -291,6 +306,7 @@
                 deleteWorkflowSelection();
             }
         });
+        setupWorkflowResizeObserver(container);
     }
 
     async function loadWorkflows(includeDisabled) {
@@ -329,6 +345,79 @@
         return workflowToolOptions;
     }
 
+    function readWorkflowMetaFromForm() {
+        const idEl = document.getElementById('workflow-id');
+        const nameEl = document.getElementById('workflow-name');
+        const descEl = document.getElementById('workflow-description');
+        const enabledEl = document.getElementById('workflow-enabled');
+        return {
+            id: idEl ? idEl.value.trim() : '',
+            name: nameEl ? nameEl.value.trim() : '',
+            description: descEl ? descEl.value.trim() : '',
+            enabled: enabledEl ? enabledEl.checked : true
+        };
+    }
+
+    function updateWorkflowCanvasTitle() {
+        const titleEl = document.getElementById('workflow-canvas-title');
+        const subtitleEl = document.getElementById('workflow-canvas-subtitle');
+        if (!titleEl) return;
+        const meta = readWorkflowMetaFromForm();
+        const wf = workflows.find(item => item.id === currentWorkflowId);
+        if (!meta.name && !meta.id) {
+            titleEl.textContent = _t('workflows.untitled');
+        } else {
+            titleEl.textContent = meta.name || meta.id;
+        }
+        titleEl.classList.toggle('is-disabled', !meta.enabled);
+        titleEl.title = meta.description || '';
+        if (subtitleEl) {
+            const parts = [];
+            if (meta.id) parts.push(meta.id);
+            if (wf && wf.version) parts.push(`v${wf.version}`);
+            parts.push(meta.enabled ? _t('workflows.statusEnabled') : _t('workflows.statusDisabled'));
+            subtitleEl.textContent = parts.join(' · ');
+            subtitleEl.hidden = !parts.length;
+        }
+    }
+
+    function syncWorkflowMetaIdField(locked, id) {
+        const idEl = document.getElementById('workflow-id');
+        const lockedEl = document.getElementById('workflow-id-locked');
+        const displayEl = document.getElementById('workflow-id-display');
+        const hintEl = document.querySelector('.workflow-meta-id-hint');
+        const idGroup = document.getElementById('workflow-meta-id-group');
+        if (!idEl) return;
+        idEl.value = id || '';
+        if (locked) {
+            idEl.hidden = true;
+            idEl.disabled = true;
+            if (lockedEl) lockedEl.hidden = false;
+            if (displayEl) displayEl.textContent = id || '';
+            if (hintEl) hintEl.hidden = true;
+            if (idGroup) idGroup.classList.add('is-locked');
+        } else {
+            idEl.hidden = false;
+            idEl.disabled = false;
+            if (lockedEl) lockedEl.hidden = true;
+            if (displayEl) displayEl.textContent = '';
+            if (hintEl) hintEl.hidden = false;
+            if (idGroup) idGroup.classList.remove('is-locked');
+        }
+    }
+
+    function syncWorkflowMetaForm(wf) {
+        const nameEl = document.getElementById('workflow-name');
+        const descEl = document.getElementById('workflow-description');
+        const enabledEl = document.getElementById('workflow-enabled');
+        if (!nameEl || !descEl || !enabledEl) return;
+        syncWorkflowMetaIdField(!!wf.id, wf.id || '');
+        nameEl.value = wf.name || '';
+        descEl.value = wf.description || '';
+        enabledEl.checked = wf.enabled !== false;
+        updateWorkflowCanvasTitle();
+    }
+
     function renderWorkflowList() {
         const list = document.getElementById('workflow-list');
         if (!list) return;
@@ -336,12 +425,28 @@
             list.innerHTML = '<div class="empty-state">' + esc(_t('workflows.emptyList')) + '</div>';
             return;
         }
-        list.innerHTML = workflows.map(wf => `
-            <button type="button" class="workflow-list-item ${wf.id === currentWorkflowId ? 'is-active' : ''}" onclick="selectWorkflow(decodeURIComponent('${encodeURIComponent(wf.id)}'))">
-                <span class="workflow-list-title">${esc(wf.name || wf.id)}</span>
-                <span class="workflow-list-meta">${esc(wf.id)} · v${wf.version || 1} · ${wf.enabled ? esc(_t('workflows.statusEnabled')) : esc(_t('workflows.statusDisabled'))}</span>
-            </button>
-        `).join('');
+        list.innerHTML = workflows.map(wf => {
+            const encodedId = encodeURIComponent(wf.id);
+            const isActive = wf.id === currentWorkflowId;
+            const toggleTitle = esc(_t('workflows.toggleEnabled'));
+            const editTitle = esc(_t('workflows.editMeta'));
+            const enabled = wf.enabled !== false;
+            return `
+                <div class="workflow-list-item ${isActive ? 'is-active' : ''}">
+                    <button type="button" class="workflow-list-main" onclick="selectWorkflow(decodeURIComponent('${encodedId}'))">
+                        <span class="workflow-list-title">${esc(wf.name || wf.id)}</span>
+                        <span class="workflow-list-meta">${esc(wf.id)} · v${wf.version || 1}</span>
+                    </button>
+                    <div class="workflow-list-actions">
+                        <label class="workflow-switch" title="${toggleTitle}" onclick="event.stopPropagation()">
+                            <input type="checkbox" ${enabled ? 'checked' : ''} aria-label="${toggleTitle}" onchange="toggleWorkflowEnabled(decodeURIComponent('${encodedId}'), this.checked)">
+                            <span class="workflow-switch-slider" aria-hidden="true"></span>
+                        </label>
+                        <button type="button" class="btn-icon workflow-list-edit" title="${editTitle}" aria-label="${editTitle}" onclick="event.stopPropagation(); editWorkflowFromList(decodeURIComponent('${encodedId}'))">${WORKFLOW_EDIT_ICON}</button>
+                    </div>
+                </div>
+            `;
+        }).join('');
     }
 
     function nextNodeId(type) {
@@ -372,19 +477,12 @@
     }
 
     function fillWorkflowForm(wf) {
+        const data = wf || {};
+        syncWorkflowMetaForm(data);
+        currentWorkflowId = data.id ? data.id : '';
         initCy();
-        const idEl = document.getElementById('workflow-id');
-        const nameEl = document.getElementById('workflow-name');
-        const descEl = document.getElementById('workflow-description');
-        const enabledEl = document.getElementById('workflow-enabled');
-        if (!idEl || !nameEl || !descEl || !enabledEl || !cy) return;
-        idEl.value = wf.id || '';
-        idEl.disabled = !!wf.id;
-        nameEl.value = wf.name || '';
-        descEl.value = wf.description || '';
-        enabledEl.checked = wf.enabled !== false;
-        currentWorkflowId = wf.id || '';
-        const graph = parseGraph(wf.graph_json || wf.graph || defaultGraph());
+        if (!cy) return;
+        const graph = parseGraph(data.graph_json || data.graph || defaultGraph());
         resetSequences(graph);
         cy.elements().remove();
         cy.add(graphToElements(graph));
@@ -411,8 +509,6 @@
             if (deleteBtn) deleteBtn.hidden = true;
             return;
         }
-        cy.elements().unselect();
-        selectedElement.select();
         empty.hidden = true;
         form.hidden = false;
         if (title) title.textContent = selectedElement.isNode() ? _t('workflows.nodeProperties') : _t('workflows.edgeProperties');
@@ -420,6 +516,8 @@
             deleteBtn.hidden = false;
             deleteBtn.textContent = selectedElement.isNode() ? _t('workflows.deleteNode') : _t('workflows.deleteEdge');
         }
+        cy.elements().unselect();
+        selectedElement.select();
         const typeWrap = document.getElementById('workflow-prop-type-wrap');
         const label = document.getElementById('workflow-prop-label');
         const type = document.getElementById('workflow-prop-type');
@@ -699,12 +797,18 @@
         if (list) list.innerHTML = '<div class="loading-spinner">' + esc(_t('common.loading')) + '</div>';
         try {
             await loadWorkflows(true);
-            renderWorkflowList();
-            if (!currentWorkflowId && workflows.length) {
+            if (currentWorkflowId) {
+                const wf = workflows.find(item => item.id === currentWorkflowId);
+                if (wf) {
+                    syncWorkflowMetaForm(wf);
+                }
+            } else if (workflows.length) {
                 fillWorkflowForm(workflows[0]);
-            } else if (!workflows.length) {
+            } else {
                 newWorkflowDraft();
+                return;
             }
+            renderWorkflowList();
         } catch (error) {
             if (list) list.innerHTML = `<div class="empty-state">${esc(error.message)}</div>`;
             if (typeof showNotification === 'function') showNotification(error.message, 'error');
@@ -712,6 +816,7 @@
     };
 
     window.newWorkflowDraft = function () {
+        currentWorkflowId = '';
         fillWorkflowForm({
             id: '',
             name: '',
@@ -719,11 +824,107 @@
             enabled: true,
             graph_json: defaultGraph()
         });
+        syncWorkflowMetaIdField(false, '');
+        openWorkflowMetaModal();
     };
 
     window.selectWorkflow = function (id) {
         const wf = workflows.find(item => item.id === id);
         if (wf) fillWorkflowForm(wf);
+    };
+
+    window.openWorkflowMetaModal = function () {
+        const nameEl = document.getElementById('workflow-name');
+        const idEl = document.getElementById('workflow-id');
+        if (currentWorkflowId) {
+            syncWorkflowMetaIdField(true, currentWorkflowId);
+        } else {
+            syncWorkflowMetaIdField(false, idEl ? idEl.value.trim() : '');
+        }
+        if (typeof openAppModal === 'function') {
+            openAppModal('workflow-meta-modal', {
+                focusEl: currentWorkflowId ? nameEl : (idEl && !idEl.hidden ? idEl : nameEl)
+            });
+        }
+    };
+
+    window.closeWorkflowMetaModal = function () {
+        if (typeof closeAppModal === 'function') {
+            closeAppModal('workflow-meta-modal');
+        }
+    };
+
+    window.applyWorkflowMetaModal = function () {
+        const meta = readWorkflowMetaFromForm();
+        if (!meta.id || !meta.name) {
+            if (typeof showNotification === 'function') {
+                showNotification(_t('workflows.idNameRequired'), 'error');
+            }
+            return;
+        }
+        updateWorkflowCanvasTitle();
+        renderWorkflowList();
+        closeWorkflowMetaModal();
+    };
+
+    window.editWorkflowFromList = function (id) {
+        if (id !== currentWorkflowId) {
+            selectWorkflow(id);
+        }
+        openWorkflowMetaModal();
+    };
+
+    window.toggleWorkflowEnabled = async function (id, enabled) {
+        const wf = workflows.find(item => item.id === id);
+        if (!wf) return;
+        const previous = wf.enabled !== false;
+        wf.enabled = enabled;
+        if (id === currentWorkflowId) {
+            const enabledEl = document.getElementById('workflow-enabled');
+            if (enabledEl) enabledEl.checked = enabled;
+            updateWorkflowCanvasTitle();
+        }
+        renderWorkflowList();
+        let graph = defaultGraph();
+        if (id === currentWorkflowId && cy) {
+            graph = elementsToGraph();
+        } else {
+            graph = parseGraph(wf.graph_json || wf.graph || defaultGraph());
+        }
+        try {
+            const response = await apiFetch(`/api/workflows/${encodeURIComponent(id)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: wf.id,
+                    name: wf.name,
+                    description: wf.description || '',
+                    enabled,
+                    graph
+                })
+            });
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || _t('workflows.enabledUpdateFailed'));
+            }
+            if (typeof showNotification === 'function') {
+                showNotification(_t('workflows.enabledUpdated'), 'success');
+            }
+            if (typeof loadWorkflowOptionsForRoleModal === 'function') {
+                await loadWorkflowOptionsForRoleModal();
+            }
+        } catch (error) {
+            wf.enabled = previous;
+            if (id === currentWorkflowId) {
+                const enabledEl = document.getElementById('workflow-enabled');
+                if (enabledEl) enabledEl.checked = previous;
+                updateWorkflowCanvasTitle();
+            }
+            renderWorkflowList();
+            if (typeof showNotification === 'function') {
+                showNotification(error.message || _t('workflows.enabledUpdateFailed'), 'error');
+            }
+        }
     };
 
     function validateWorkflowGraph(graph) {
@@ -772,12 +973,12 @@
 
     window.saveWorkflowDraft = async function () {
         initCy();
-        const id = document.getElementById('workflow-id').value.trim();
-        const name = document.getElementById('workflow-name').value.trim();
-        const description = document.getElementById('workflow-description').value.trim();
-        const enabled = document.getElementById('workflow-enabled').checked;
-        if (!id || !name) {
-            showNotification(_t('workflows.idNameRequired'), 'error');
+        const meta = readWorkflowMetaFromForm();
+        if (!meta.id || !meta.name) {
+            if (typeof showNotification === 'function') {
+                showNotification(_t('workflows.idNameRequired'), 'error');
+            }
+            openWorkflowMetaModal();
             return;
         }
         const graph = elementsToGraph();
@@ -791,7 +992,13 @@
         const response = await apiFetch(url, {
             method,
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id, name, description, enabled, graph })
+            body: JSON.stringify({
+                id: meta.id,
+                name: meta.name,
+                description: meta.description,
+                enabled: meta.enabled,
+                graph
+            })
         });
         if (!response.ok) {
             const err = await response.json().catch(() => ({}));
@@ -799,7 +1006,9 @@
             return;
         }
         const data = await response.json();
-        currentWorkflowId = data.workflow && data.workflow.id ? data.workflow.id : id;
+        currentWorkflowId = data.workflow && data.workflow.id ? data.workflow.id : meta.id;
+        syncWorkflowMetaIdField(true, currentWorkflowId);
+        closeWorkflowMetaModal();
         showNotification(_t('workflows.saved'), 'success');
         await refreshWorkflows();
         if (typeof loadWorkflowOptionsForRoleModal === 'function') {
@@ -808,7 +1017,8 @@
     };
 
     window.deleteCurrentWorkflow = async function () {
-        const id = currentWorkflowId || document.getElementById('workflow-id').value.trim();
+        const meta = readWorkflowMetaFromForm();
+        const id = currentWorkflowId || meta.id;
         if (!id) {
             showNotification(_t('workflows.selectToDelete'), 'warning');
             return;
@@ -984,6 +1194,7 @@
             connectBtn.textContent = connectMode ? _t('workflows.connecting') : _t('workflows.connect');
         }
         refreshCanvasLabels();
+        updateWorkflowCanvasTitle();
         renderWorkflowList();
         if (selectedElement && selectedElement.length) {
             selectWorkflowElement(selectedElement);
