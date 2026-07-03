@@ -1,0 +1,48 @@
+# CyberStrikeAI hot-reload config (air)
+# Install: go install github.com/air-verse/air@latest
+# Run:     air
+
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  # Build command
+  cmd = "go build -o ./tmp/cyberstrike-ai cmd/server/main.go"
+  # Binary path (no args here)
+  bin = "./tmp/cyberstrike-ai"
+  # Full command with args
+  full_bin = "./tmp/cyberstrike-ai -config config.yaml --https"
+  # Watch these extensions
+  include_ext = ["go", "yaml", "html", "tmpl"]
+  # Directories to watch
+  include_dir = ["cmd", "internal", "web"]
+  # Exclude directories (venv, node_modules, data, etc.)
+  exclude_dir = ["tmp", "venv", "data", "knowledge_base", ".git", ".idea", "images", "plugins"]
+  # Exclude files
+  exclude_file = ["config.yaml.backup"]
+  # Exclude regex (generated files, test files)
+  exclude_regex = ["_test\\.go$", "\\.db$"]
+  # Delay before rebuild (ms) - set higher to avoid rebuilds during batch deploy
+  delay = 2000
+  # Stop on error
+  stop_on_error = true
+  # Send interrupt signal before kill
+  send_interrupt = true
+  # Delay after interrupt before force kill (ms)
+  kill_delay = 2000
+
+[log]
+  # Show log time
+  time = true
+  # Main log only
+  main_only = false
+
+[color]
+  main = "cyan"
+  watcher = "magenta"
+  build = "yellow"
+  runner = "green"
+
+[misc]
+  # Delete tmp dir on exit
+  clean_on_exit = true

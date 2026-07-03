@@ -1,0 +1,28 @@
+# 运行时生成文件（GoLand 部署时应排除这些路径）
+# Settings → Deployment → Excluded Paths → 添加 Deployment path
+
+# 数据和状态
+data/
+chat_uploads/
+knowledge_base/
+
+# 服务器独立配置（避免覆盖服务器的 API Key 等）
+config.yaml
+config.yaml.backup
+
+# 编译产物和临时文件
+tmp/
+cyberstrike-ai
+*.db
+
+# 运行时文件
+.cyberstrike.pid
+cyberstrike.log
+nohup.out
+
+# Python 虚拟环境（服务器单独安装）
+venv/
+
+# IDE
+.idea/
+.claude/
