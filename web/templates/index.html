@@ -201,6 +201,16 @@
                             <span data-i18n="nav.tasks">任务管理</span>
                         </div>
                     </div>
+                    <div class="nav-item" data-page="workflows">
+                        <div class="nav-item-content" data-title="图编排" onclick="switchPage('workflows')" data-i18n="nav.workflows" data-i18n-attr="data-title" data-i18n-skip-text="true">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="3" y="3" width="8" height="8" rx="2"/>
+                                <path d="M7 11v4a2 2 0 0 0 2 2h4"/>
+                                <rect x="13" y="13" width="8" height="8" rx="2"/>
+                            </svg>
+                            <span data-i18n="nav.workflows">图编排</span>
+                        </div>
+                    </div>
                     <div class="nav-item" data-page="projects">
                         <div class="nav-item-content" data-title="项目管理" onclick="switchPage('projects')" data-i18n="nav.projects" data-i18n-attr="data-title" data-i18n-skip-text="true">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -2290,12 +2300,12 @@
                         <h2 data-i18n="chatFilesPage.title">文件管理</h2>
                         <div class="page-header-actions">
                             <button type="button" class="btn-primary" id="chat-files-header-upload-btn" onclick="chatFilesOpenUploadPicker()" data-i18n="chatFilesPage.upload">上传文件</button>
-                            <input type="file" id="chat-files-upload-input" style="display:none" onchange="onChatFilesUploadPick(event)" />
+                            <input type="file" id="chat-files-upload-input" style="display:none" multiple onchange="onChatFilesUploadPick(event)" />
                             <button type="button" class="btn-secondary" id="chat-files-refresh-btn" onclick="loadChatFilesPage()" data-i18n="common.refresh">刷新</button>
                         </div>
                     </div>
                     <div class="page-content">
-                        <p class="chat-files-intro" data-i18n="chatFilesPage.intro">管理在对话中上传的文件。需要让 AI 引用某文件时，在列表中点击「复制路径」，到对话里粘贴即可。</p>
+                        <p class="chat-files-intro" data-i18n="chatFilesPage.intro">管理在对话中上传的文件。可将文件拖拽到下方列表区域，或点击「上传文件」选择文件（支持多选）。需要让 AI 引用某文件时，在列表中点击「复制路径」，到对话里粘贴即可。</p>
                         <div class="tasks-filters chat-files-filters">
                             <label>
                                 <span data-i18n="chatFilesPage.conversationFilter">会话 ID</span>
@@ -2534,6 +2544,95 @@
                 <div id="c2-modal" class="c2-modal-overlay" style="display:none;" onclick="if(event.target===this)C2.closeModal()">
                     <div class="c2-modal" onclick="event.stopPropagation()">
                         <div id="c2-modal-content"></div>
+                    </div>
+                </div>
+
+                <!-- 图编排页面 -->
+                <div id="page-workflows" class="page">
+                    <div class="page-header">
+                        <h2 data-i18n="workflows.title">图编排</h2>
+                        <div class="page-header-actions">
+                            <button class="btn-secondary" onclick="refreshWorkflows()" data-i18n="common.refresh">刷新</button>
+                            <button class="btn-primary" onclick="newWorkflowDraft()" data-i18n="workflows.newGraph">新建图</button>
+                        </div>
+                    </div>
+                    <div class="page-content workflow-page-content">
+                        <aside class="workflow-sidebar">
+                            <div class="workflow-panel">
+                                <div class="workflow-panel-header">
+                                    <h3 data-i18n="workflows.processLibrary">流程库</h3>
+                                </div>
+                                <div id="workflow-list" class="workflow-list">
+                                    <div class="loading-spinner" data-i18n="common.loading">加载中...</div>
+                                </div>
+                            </div>
+                            <div class="workflow-panel">
+                                <div class="workflow-panel-header">
+                                    <h3 data-i18n="workflows.nodeLibrary">节点库</h3>
+                                </div>
+                                <div class="workflow-node-palette">
+                                    <button type="button" draggable="true" data-node-type="start" ondragstart="workflowPaletteDragStart(event)" onclick="addWorkflowNodeFromPalette('start')" data-i18n="workflows.nodes.start">开始</button>
+                                    <button type="button" draggable="true" data-node-type="tool" ondragstart="workflowPaletteDragStart(event)" onclick="addWorkflowNodeFromPalette('tool')" data-i18n="workflows.nodes.tool">工具</button>
+                                    <button type="button" draggable="true" data-node-type="agent" ondragstart="workflowPaletteDragStart(event)" onclick="addWorkflowNodeFromPalette('agent')" data-i18n="workflows.nodes.agent">Agent</button>
+                                    <button type="button" draggable="true" data-node-type="condition" ondragstart="workflowPaletteDragStart(event)" onclick="addWorkflowNodeFromPalette('condition')" data-i18n="workflows.nodes.condition">条件</button>
+                                    <button type="button" draggable="true" data-node-type="hitl" ondragstart="workflowPaletteDragStart(event)" onclick="addWorkflowNodeFromPalette('hitl')" data-i18n="workflows.nodes.hitl">审批</button>
+                                    <button type="button" draggable="true" data-node-type="output" ondragstart="workflowPaletteDragStart(event)" onclick="addWorkflowNodeFromPalette('output')" data-i18n="workflows.nodes.output">输出</button>
+                                    <button type="button" draggable="true" data-node-type="end" ondragstart="workflowPaletteDragStart(event)" onclick="addWorkflowNodeFromPalette('end')" data-i18n="workflows.nodes.end">结束</button>
+                                </div>
+                            </div>
+                        </aside>
+                        <main class="workflow-main">
+                            <section class="workflow-meta-bar">
+                                <div class="workflow-canvas-header">
+                                    <div class="workflow-canvas-heading">
+                                        <h3 id="workflow-canvas-title" class="workflow-canvas-title" data-i18n="workflows.untitled">未命名流程</h3>
+                                        <span id="workflow-canvas-subtitle" class="workflow-canvas-subtitle" hidden></span>
+                                    </div>
+                                </div>
+                                <div class="workflow-toolbar">
+                                    <button class="btn-secondary btn-small" type="button" onclick="toggleWorkflowConnectMode()" id="workflow-connect-btn" data-i18n="workflows.connect">连线</button>
+                                    <button class="btn-secondary btn-small" type="button" onclick="deleteWorkflowSelection()" data-i18n="workflows.deleteSelected">删除选中</button>
+                                    <button class="btn-secondary btn-small" type="button" onclick="layoutWorkflowGraph()" data-i18n="workflows.autoLayout">自动布局</button>
+                                    <button class="btn-secondary btn-small" onclick="deleteCurrentWorkflow()" data-i18n="common.delete">删除</button>
+                                    <button class="btn-primary btn-small" onclick="saveWorkflowDraft()" data-i18n="common.save">保存</button>
+                                </div>
+                            </section>
+                            <section class="workflow-canvas-wrap" ondragover="workflowCanvasDragOver(event)" ondrop="workflowCanvasDrop(event)">
+                                <div id="workflow-canvas"></div>
+                                <div id="workflow-canvas-empty" class="workflow-canvas-empty" data-i18n="workflows.canvasEmpty">从左侧拖拽节点到画布，或点击节点按钮快速添加</div>
+                            </section>
+                        </main>
+                        <aside class="workflow-properties">
+                            <div class="workflow-panel-header">
+                                <h3 id="workflow-property-title" data-i18n="workflows.properties">属性</h3>
+                                <button type="button" id="workflow-property-delete-btn" class="btn-secondary btn-small" onclick="deleteWorkflowSelection()" hidden data-i18n="common.delete">删除</button>
+                            </div>
+                            <div id="workflow-property-empty" class="workflow-property-empty" data-i18n="workflows.propertyEmpty">选择一个节点或连线后编辑属性</div>
+                            <div id="workflow-property-form" class="workflow-property-form" hidden>
+                                <div class="form-group">
+                                    <label for="workflow-prop-label" data-i18n="workflows.propLabel">名称</label>
+                                    <input type="text" id="workflow-prop-label" class="form-input" oninput="updateWorkflowSelectedProperty()">
+                                </div>
+                                <div class="form-group" id="workflow-prop-type-wrap">
+                                    <label for="workflow-prop-type" data-i18n="workflows.propType">类型</label>
+                                    <select id="workflow-prop-type" onchange="updateWorkflowSelectedProperty()">
+                                        <option value="start" data-i18n="workflows.nodes.start">开始</option>
+                                        <option value="tool" data-i18n="workflows.nodes.tool">工具</option>
+                                        <option value="agent" data-i18n="workflows.nodes.agent">Agent</option>
+                                        <option value="condition" data-i18n="workflows.nodes.condition">条件</option>
+                                        <option value="hitl" data-i18n="workflows.nodes.hitl">审批</option>
+                                        <option value="output" data-i18n="workflows.nodes.output">输出</option>
+                                        <option value="end" data-i18n="workflows.nodes.end">结束</option>
+                                    </select>
+                                </div>
+                                <div id="workflow-typed-config" class="workflow-typed-config"></div>
+                                <div class="workflow-custom-fields-head">
+                                    <span data-i18n="workflows.customFields">自定义字段</span>
+                                    <button type="button" class="btn-secondary btn-small" onclick="addWorkflowCustomField()" data-i18n="workflows.addField">添加字段</button>
+                                </div>
+                                <div id="workflow-custom-fields" class="workflow-custom-fields"></div>
+                            </div>
+                        </aside>
                     </div>
                 </div>
 
@@ -3938,6 +4037,44 @@
             window.ELK = elk;
         }
     </script>
+    <!-- 图编排流程信息 -->
+    <div id="workflow-meta-modal" class="modal" style="display: none;">
+        <div class="modal-content workflow-meta-modal-content">
+            <div class="modal-header workflow-meta-modal-header">
+                <h2 data-i18n="workflows.metaModalTitle">流程信息</h2>
+                <span class="modal-close" onclick="closeWorkflowMetaModal()">&times;</span>
+            </div>
+            <div class="modal-body workflow-meta-modal-body">
+                <div class="form-group workflow-meta-field">
+                    <label for="workflow-name"><span data-i18n="workflows.metaName">名称</span> <span class="form-required">*</span></label>
+                    <input type="text" id="workflow-name" class="form-input" data-i18n="workflows.namePlaceholder" data-i18n-attr="placeholder" placeholder="基础 Web 扫描" autocomplete="off">
+                </div>
+                <div class="form-group workflow-meta-field workflow-meta-id-group" id="workflow-meta-id-group">
+                    <label for="workflow-id"><span data-i18n="workflows.metaId">ID</span> <span class="form-required">*</span></label>
+                    <div id="workflow-id-locked" class="workflow-meta-id-locked" hidden>
+                        <code id="workflow-id-display"></code>
+                    </div>
+                    <input type="text" id="workflow-id" class="form-input workflow-meta-id-input" placeholder="web-scan-basic" autocomplete="off">
+                    <small class="workflow-meta-id-hint form-hint" data-i18n="workflows.metaIdHint">创建后不可修改，用于 API 与角色绑定</small>
+                </div>
+                <div class="form-group workflow-meta-field">
+                    <label for="workflow-description" data-i18n="workflows.metaDescription">描述</label>
+                    <input type="text" id="workflow-description" class="form-input" data-i18n="workflows.descriptionPlaceholder" data-i18n-attr="placeholder" placeholder="可选" autocomplete="off">
+                </div>
+                <div class="workflow-meta-enable-row">
+                    <span class="workflow-meta-enable-label" data-i18n="workflows.metaEnabled">启用</span>
+                    <label class="workflow-switch workflow-switch--modal" data-i18n="workflows.metaEnabledHint" data-i18n-attr="title" title="禁用后无法被角色自动触发">
+                        <input type="checkbox" id="workflow-enabled" checked>
+                        <span class="workflow-switch-slider" aria-hidden="true"></span>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer workflow-meta-modal-footer">
+                <button type="button" class="btn-secondary btn-small" onclick="closeWorkflowMetaModal()" data-i18n="common.cancel">取消</button>
+                <button type="button" class="btn-primary btn-small" onclick="applyWorkflowMetaModal()" data-i18n="common.confirm">确认</button>
+            </div>
+        </div>
+    </div>
     <!-- 知识项编辑模态框 -->
     <!-- Skill模态框 -->
     <div id="skill-modal" class="modal">
@@ -4385,11 +4522,11 @@
                 </div>
                 <div class="form-group">
                     <label for="vulnerability-title"><span data-i18n="vulnerabilityModal.title">标题</span> <span style="color: red;">*</span></label>
-                    <input type="text" id="vulnerability-title" data-i18n="vulnerabilityModal.titlePlaceholder" data-i18n-attr="placeholder" placeholder="漏洞标题" required />
+                    <input type="text" id="vulnerability-title" data-i18n="vulnerabilityModal.titlePlaceholder" data-i18n-attr="placeholder" placeholder="/api/login 存在 SQL 注入" required />
                 </div>
                 <div class="form-group">
-                    <label for="vulnerability-description" data-i18n="vulnerabilityModal.description">描述</label>
-                    <textarea id="vulnerability-description" rows="5" data-i18n="vulnerabilityModal.descriptionPlaceholder" data-i18n-attr="placeholder" placeholder="漏洞详细描述"></textarea>
+                    <label for="vulnerability-description"><span data-i18n="vulnerabilityModal.description">描述</span> <span style="color: red;">*</span></label>
+                    <textarea id="vulnerability-description" rows="7" data-i18n="vulnerabilityModal.descriptionPlaceholder" data-i18n-attr="placeholder" placeholder="建议包含：摘要、测试环境与范围、前置条件、复现步骤、预期结果、实际结果。"></textarea>
                 </div>
                 <div class="form-group">
                     <label for="vulnerability-severity"><span data-i18n="vulnerabilityModal.severity">严重程度</span> <span style="color: red;">*</span></label>
@@ -4413,24 +4550,36 @@
                     </select>
                 </div>
                 <div class="form-group">
-                    <label for="vulnerability-type" data-i18n="vulnerabilityModal.type">漏洞类型</label>
+                    <label for="vulnerability-type"><span data-i18n="vulnerabilityModal.type">漏洞类型</span> <span style="color: red;">*</span></label>
                     <input type="text" id="vulnerability-type" data-i18n="vulnerabilityModal.typePlaceholder" data-i18n-attr="placeholder" placeholder="如：SQL注入、XSS、CSRF等" />
                 </div>
                 <div class="form-group">
-                    <label for="vulnerability-target" data-i18n="vulnerabilityModal.target">目标</label>
-                    <input type="text" id="vulnerability-target" data-i18n="vulnerabilityModal.targetPlaceholder" data-i18n-attr="placeholder" placeholder="受影响的目标（URL、IP地址等）" />
+                    <label for="vulnerability-target"><span data-i18n="vulnerabilityModal.target">目标</span> <span style="color: red;">*</span></label>
+                    <input type="text" id="vulnerability-target" data-i18n="vulnerabilityModal.targetPlaceholder" data-i18n-attr="placeholder" placeholder="精确到 URL/IP:端口/接口路径/参数名" />
                 </div>
                 <div class="form-group">
-                    <label for="vulnerability-proof" data-i18n="vulnerabilityModal.proof">证明（POC）</label>
-                    <textarea id="vulnerability-proof" rows="5" data-i18n="vulnerabilityModal.proofPlaceholder" data-i18n-attr="placeholder" placeholder="漏洞证明，如请求/响应、截图等"></textarea>
+                    <label for="vulnerability-preconditions" data-i18n="vulnerabilityModal.preconditions">前置条件</label>
+                    <textarea id="vulnerability-preconditions" rows="3" data-i18n="vulnerabilityModal.preconditionsPlaceholder" data-i18n-attr="placeholder" placeholder="登录状态、权限、账号、Header/Cookie、特定数据、环境/版本；无则写无。"></textarea>
                 </div>
                 <div class="form-group">
-                    <label for="vulnerability-impact" data-i18n="vulnerabilityModal.impact">影响</label>
-                    <textarea id="vulnerability-impact" rows="3" data-i18n="vulnerabilityModal.impactPlaceholder" data-i18n-attr="placeholder" placeholder="漏洞影响说明"></textarea>
+                    <label for="vulnerability-reproduction-steps"><span data-i18n="vulnerabilityModal.reproductionSteps">复现步骤</span> <span style="color: red;">*</span></label>
+                    <textarea id="vulnerability-reproduction-steps" rows="6" data-i18n="vulnerabilityModal.reproductionStepsPlaceholder" data-i18n-attr="placeholder" placeholder="按 1/2/3 编号，写清入口、参数、payload、执行命令、观察点。"></textarea>
                 </div>
                 <div class="form-group">
-                    <label for="vulnerability-recommendation" data-i18n="vulnerabilityModal.recommendation">修复建议</label>
-                    <textarea id="vulnerability-recommendation" rows="3" data-i18n="vulnerabilityModal.recommendationPlaceholder" data-i18n-attr="placeholder" placeholder="修复建议"></textarea>
+                    <label for="vulnerability-evidence"><span data-i18n="vulnerabilityModal.evidence">证据 / POC</span> <span style="color: red;">*</span></label>
+                    <textarea id="vulnerability-evidence" rows="8" data-i18n="vulnerabilityModal.evidencePlaceholder" data-i18n-attr="placeholder" placeholder="原始请求/响应、curl/工具命令、截图说明、日志、DNSLog/回连记录、数据库结果、文件路径、时间戳等。"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="vulnerability-impact"><span data-i18n="vulnerabilityModal.impact">影响</span> <span style="color: red;">*</span></label>
+                    <textarea id="vulnerability-impact" rows="3" data-i18n="vulnerabilityModal.impactPlaceholder" data-i18n-attr="placeholder" placeholder="结合已验证事实说明实际影响，例如越权读取哪些数据。"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="vulnerability-recommendation"><span data-i18n="vulnerabilityModal.recommendation">修复建议</span> <span style="color: red;">*</span></label>
+                    <textarea id="vulnerability-recommendation" rows="3" data-i18n="vulnerabilityModal.recommendationPlaceholder" data-i18n-attr="placeholder" placeholder="写具体修复点和复测标准。"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="vulnerability-retest-notes" data-i18n="vulnerabilityModal.retestNotes">复测方式</label>
+                    <textarea id="vulnerability-retest-notes" rows="3" data-i18n="vulnerabilityModal.retestNotesPlaceholder" data-i18n-attr="placeholder" placeholder="修复后如何验证漏洞已关闭，包括应返回的状态码、错误信息或访问控制结果。"></textarea>
                 </div>
             </div>
             <div class="modal-footer">
@@ -4548,6 +4697,20 @@
                     <label for="role-user-prompt" data-i18n="roleModal.userPrompt">用户提示词</label>
                     <textarea id="role-user-prompt" rows="10" data-i18n="roleModal.userPromptPlaceholder" data-i18n-attr="placeholder" placeholder="输入用户提示词，会在用户消息前追加此提示词..."></textarea>
                     <small class="form-hint" data-i18n="roleModal.userPromptHint">此提示词会追加到用户消息前，用于指导AI的行为。注意：这不会修改系统提示词。</small>
+                </div>
+                <div class="form-group">
+                    <label for="role-workflow-id" data-i18n="roleModal.bindWorkflow">绑定图编排流程</label>
+                    <select id="role-workflow-id">
+                        <option value="" data-i18n="roleModal.noWorkflowBind">不绑定流程</option>
+                    </select>
+                    <small class="form-hint" data-i18n="roleModal.bindWorkflowHint">选中流程后，对话页使用该角色会自动触发绑定图；流程字段由图定义 JSON 自由配置。</small>
+                </div>
+                <div class="form-group">
+                    <label for="role-workflow-policy" data-i18n="roleModal.workflowPolicy">流程触发策略</label>
+                    <select id="role-workflow-policy">
+                        <option value="auto" data-i18n="roleModal.workflowPolicyAuto">自动触发</option>
+                        <option value="off" data-i18n="roleModal.workflowPolicyOff">关闭</option>
+                    </select>
                 </div>
                 <div class="form-group" id="role-tools-section">
                     <label data-i18n="roleModal.relatedTools">关联的工具（可选）</label>
@@ -4767,6 +4930,7 @@
     <script src="/static/js/webshell.js"></script>
     <script src="/static/js/chat-files.js"></script>
     <script src="/static/js/tasks.js"></script>
+    <script src="/static/js/workflows.js"></script>
     <script src="/static/js/roles.js"></script>
     <script src="/static/js/c2.js"></script>
 </body>

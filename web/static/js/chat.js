@@ -137,9 +137,12 @@ function normalizeHitlMode(mode) {
 }
 
 function defaultHitlConfig() {
+    const serverReviewer = (typeof window !== 'undefined' && window.csaiHitlDefaultReviewer)
+        ? window.csaiHitlDefaultReviewer
+        : 'human';
     return {
         mode: HITL_MODE_OFF,
-        reviewer: 'human',
+        reviewer: normalizeHitlReviewer(serverReviewer),
         sensitiveTools: '',
         updatedAt: ''
     };
@@ -315,16 +318,18 @@ async function onHitlReviewerChanged(reviewer) {
     const cfg = readHitlConfigFromForm();
     const cid = typeof currentConversationId === 'string' ? currentConversationId.trim() : '';
     saveHitlConfigForConversation(cid, cfg, { syncGlobalLast: true });
-    if (cid && typeof window.saveHitlConversationConfig === 'function') {
-        try {
+    try {
+        if (cid && typeof window.saveHitlConversationConfig === 'function') {
             await window.saveHitlConversationConfig(cid, cfg);
-            const ok = typeof window.t === 'function' ? window.t('hitl.pageReviewerSaved') : '审批方已保存。';
-            showChatToast(ok, 'success');
-        } catch (e) {
-            console.warn('onHitlReviewerChanged', e);
-            const prefix = typeof window.t === 'function' ? window.t('chat.hitlApplyFail') : '同步到服务器失败';
-            showChatToast(prefix, 'error');
+        } else if (typeof window.putHitlDefaultReviewer === 'function') {
+            await window.putHitlDefaultReviewer(cfg.reviewer);
         }
+        const ok = typeof window.t === 'function' ? window.t('hitl.pageReviewerSaved') : '审批方已保存。';
+        showChatToast(ok, 'success');
+    } catch (e) {
+        console.warn('onHitlReviewerChanged', e);
+        const prefix = typeof window.t === 'function' ? window.t('chat.hitlApplyFail') : '同步到服务器失败';
+        showChatToast(prefix, 'error');
     }
 }
 
@@ -507,6 +512,7 @@ function chatAgentModeNormalizeStored(stored, cfg) {
 
 if (typeof window !== 'undefined') {
     window.csaiHitlGlobalToolWhitelist = window.csaiHitlGlobalToolWhitelist || [];
+    window.csaiHitlDefaultReviewer = window.csaiHitlDefaultReviewer || 'human';
     window.csaiChatAgentMode = {
         EINO_MODES: CHAT_AGENT_EINO_MODES,
         EINO_SINGLE: CHAT_AGENT_MODE_EINO_SINGLE,
@@ -518,6 +524,7 @@ if (typeof window !== 'undefined') {
     window.applyHitlSidebarConfig = applyHitlSidebarConfig;
     window.readHitlConfigFromForm = readHitlConfigFromForm;
     window.applyHitlConfigToUI = applyHitlConfigToUI;
+    window.refreshHitlConfigByCurrentConversation = refreshHitlConfigByCurrentConversation;
     window.saveHitlConfigForConversation = saveHitlConfigForConversation;
     window.getHitlConfigForConversation = getHitlConfigForConversation;
     bindHitlSidebarModeListener();
@@ -2020,6 +2027,19 @@ function refreshSystemReadyMessageBubbles() {
     });
 }
 
+function createMessageAvatar(role) {
+    const avatar = document.createElement('div');
+    avatar.className = 'message-avatar';
+    if (role === 'user') {
+        avatar.innerHTML = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="7" r="4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    } else if (role === 'assistant') {
+        avatar.innerHTML = '<img src="/static/logo.png" alt="" class="message-avatar-img">';
+    } else {
+        avatar.textContent = 'S';
+    }
+    return avatar;
+}
+
 // 添加消息（options.systemReadyMessage 为 true 时，语言切换会刷新该条文案）
 function addMessage(role, content, mcpExecutionIds = null, progressId = null, createdAt = null, options = null) {
     const messagesDiv = document.getElementById('chat-messages');
@@ -2030,16 +2050,7 @@ function addMessage(role, content, mcpExecutionIds = null, progressId = null, cr
     messageDiv.className = 'message ' + role;
     
     // 创建头像
-    const avatar = document.createElement('div');
-    avatar.className = 'message-avatar';
-    if (role === 'user') {
-        avatar.textContent = 'U';
-    } else if (role === 'assistant') {
-        avatar.textContent = 'A';
-    } else {
-        avatar.textContent = 'S';
-    }
-    messageDiv.appendChild(avatar);
+    messageDiv.appendChild(createMessageAvatar(role));
     
     // 创建消息内容容器
     const contentWrapper = document.createElement('div');
@@ -2400,6 +2411,15 @@ function processDetailRowFingerprint(d) {
     return et + '\0' + msg + '\0' + dataKey;
 }
 
+function compactWorkflowProcessDetails(details) {
+    if (!Array.isArray(details) || details.length === 0) return details || [];
+    return details.filter((detail) => {
+        const eventType = detail && detail.eventType ? String(detail.eventType) : '';
+        // workflow_node_start 已经表达了节点进入；这些事件只用于实时状态，落到详情里会让 Agent 节点看起来重复启动。
+        return eventType !== 'workflow_agent_start';
+    });
+}
+
 // 渲染过程详情
 // options.append=true 时分页追加；options.markLoaded=false 时保留 lazy 标记（分页加载中）
 function renderProcessDetails(messageId, processDetails, options) {
@@ -2491,6 +2511,7 @@ function renderProcessDetails(messageId, processDetails, options) {
     if (typeof window.coalesceProcessDetailsToolPairs === 'function') {
         processDetails = window.coalesceProcessDetailsToolPairs(processDetails);
     }
+    processDetails = compactWorkflowProcessDetails(processDetails);
     // 如果没有processDetails或为空，显示空状态
     if (!processDetails || processDetails.length === 0) {
         if (!appendMode) {
@@ -2518,7 +2539,44 @@ function renderProcessDetails(messageId, processDetails, options) {
         const agPx = processDetailAgentPrefix(data);
         
         let itemTitle = title;
-        if (eventType === 'iteration') {
+        if (eventType === 'workflow_start') {
+            const name = data.workflowName || data.workflowId || '';
+            itemTitle = '🧭 工作流开始' + (name ? (' · ' + name) : '');
+        } else if (eventType === 'workflow_done') {
+            const name = data.workflowName || data.workflowId || '';
+            itemTitle = '✅ 工作流完成' + (name ? (' · ' + name) : '');
+        } else if (eventType === 'workflow_node_start') {
+            const label = data.label || title || data.nodeId || '';
+            itemTitle = '▶ 节点开始' + (label ? (' · ' + label) : '');
+        } else if (eventType === 'workflow_node_result') {
+            const label = data.label || data.nodeId || '';
+            const status = data.status || '';
+            const nodeType = data.nodeType != null ? String(data.nodeType).toLowerCase() : '';
+            if (nodeType === 'condition') {
+                const matched = data.matched === true || data.matched === 'true' || (data.output && (data.output.matched === true || data.output.matched === 'true'));
+                itemTitle = (matched ? '✅' : '🔀') + ' 条件判断' + (label ? (' · ' + label) : '') + ' → ' + (matched ? '是' : '否');
+            } else {
+                const icon = status === 'failed' ? '❌' : (status === 'skipped' ? '⏭️' : '✅');
+                itemTitle = icon + ' 节点完成' + (label ? (' · ' + label) : '') + (status ? ('（' + status + '）') : '');
+            }
+        } else if (eventType === 'workflow_branch_taken' || eventType === 'workflow_branch_skipped') {
+            const branch = data.branchLabel || '';
+            const target = data.targetLabel || data.targetId || '';
+            const taken = eventType === 'workflow_branch_taken';
+            itemTitle = (taken ? '➡️' : '⏭️') + (taken ? ' 执行分支' : ' 跳过分支') + (branch ? (' · ' + branch) : '') + (target ? (' → ' + target) : '');
+        } else if (eventType === 'workflow_tool_start') {
+            const tool = data.tool || data.toolName || '';
+            itemTitle = '🔧 工具节点' + (tool ? (' · ' + tool) : '');
+        } else if (eventType === 'workflow_agent_output') {
+            const label = data.label || data.nodeId || '';
+            itemTitle = '🤖 Agent 输出' + (label ? (' · ' + label) : '');
+        } else if (eventType === 'workflow_hitl_checkpoint') {
+            itemTitle = '🧑‍⚖️ 人工确认检查点';
+        } else if (eventType === 'workflow_hitl_waiting') {
+            itemTitle = '🧑‍⚖️ 工作流等待审批';
+        } else if (eventType === 'workflow_paused') {
+            itemTitle = '⏸️ 工作流已暂停';
+        } else if (eventType === 'iteration') {
             const n = data.iteration || 1;
             if (data.orchestration === 'plan_execute' && data.einoScope === 'main') {
                 const phase = typeof window.translatePlanExecuteAgentName === 'function'
@@ -2649,14 +2707,21 @@ function finishProcessDetailsRender(messageElement, processDetails, isLazyNotLoa
     }
     
     const hasPendingHitlInDetails = processDetails.some(d => d && d.eventType === 'hitl_interrupt');
+    const hasPendingWorkflowHitl = processDetails.some(d => d && d.eventType === 'workflow_hitl_waiting');
     const hasErrorOrCancelled = processDetails.some(d => 
         d.eventType === 'error' || d.eventType === 'cancelled'
     );
-    if (hasErrorOrCancelled && !hasPendingHitlInDetails) {
+    if (hasErrorOrCancelled && !hasPendingHitlInDetails && !hasPendingWorkflowHitl) {
         timeline.classList.remove('expanded');
         const processDetailBtn = messageElement.querySelector('.process-detail-btn');
         if (processDetailBtn) {
             processDetailBtn.innerHTML = '<span>' + (typeof window.t === 'function' ? window.t('chat.expandDetail') : '展开详情') + '</span>';
+        }
+    }
+    if (hasPendingWorkflowHitl && messageElement && messageElement.id) {
+        const convId = typeof window.currentConversationId === 'string' ? window.currentConversationId : '';
+        if (convId && typeof window.restoreWorkflowHitlInlineForConversation === 'function') {
+            window.restoreWorkflowHitlInlineForConversation(convId);
         }
     }
 }

@@ -356,6 +356,9 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 	attackChainHandler := handler.NewAttackChainHandler(db, &cfg.OpenAI, log.Logger)
 	vulnerabilityHandler := handler.NewVulnerabilityHandler(db, log.Logger)
 	projectHandler := handler.NewProjectHandler(db, log.Logger)
+	workflowHandler := handler.NewWorkflowHandler(db, log.Logger)
+	workflowHandler.SetAudit(auditSvc)
+	workflowHandler.SetRuntime(agent, cfg)
 	vulnerabilityHandler.SetAudit(auditSvc)
 	webshellHandler := handler.NewWebShellHandler(log.Logger, db)
 	webshellHandler.SetAudit(auditSvc)
@@ -367,6 +370,7 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 	configHandler.SetAudit(auditSvc)
 	agentHandler.SetHitlToolWhitelistSaver(configHandler)
 	agentHandler.SetHitlAuditStrategySaver(configHandler)
+	agentHandler.SetHitlDefaultReviewerSaver(configHandler)
 	externalMCPHandler := handler.NewExternalMCPHandler(externalMCPMgr, cfg, configPath, log.Logger)
 	externalMCPHandler.SetAudit(auditSvc)
 	roleHandler := handler.NewRoleHandler(cfg, configPath, log.Logger)
@@ -517,6 +521,7 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 		app, // 传递 App 实例以便动态获取 knowledgeHandler
 		vulnerabilityHandler,
 		projectHandler,
+		workflowHandler,
 		webshellHandler,
 		chatUploadsHandler,
 		roleHandler,
@@ -763,6 +768,7 @@ func setupRoutes(
 	app *App, // 传递 App 实例以便动态获取 knowledgeHandler
 	vulnerabilityHandler *handler.VulnerabilityHandler,
 	projectHandler *handler.ProjectHandler,
+	workflowHandler *handler.WorkflowHandler,
 	webshellHandler *handler.WebShellHandler,
 	chatUploadsHandler *handler.ChatUploadsHandler,
 	roleHandler *handler.RoleHandler,
@@ -826,6 +832,8 @@ func setupRoutes(
 		protected.GET("/hitl/tool-whitelist", agentHandler.GetHITLGlobalToolWhitelist)
 		protected.PUT("/hitl/tool-whitelist", agentHandler.SetHITLGlobalToolWhitelist)
 		protected.POST("/hitl/tool-whitelist", agentHandler.MergeHITLGlobalToolWhitelist)
+		protected.GET("/hitl/default-reviewer", agentHandler.GetHITLDefaultReviewer)
+		protected.PUT("/hitl/default-reviewer", agentHandler.UpdateHITLDefaultReviewer)
 		protected.GET("/hitl/audit-strategy", agentHandler.GetHITLAuditStrategy)
 		protected.PUT("/hitl/audit-strategy", agentHandler.UpdateHITLAuditStrategy)
 		// Agent Loop 取消与任务列表
@@ -1188,6 +1196,16 @@ func setupRoutes(
 		protected.POST("/roles", roleHandler.CreateRole)
 		protected.PUT("/roles/:name", roleHandler.UpdateRole)
 		protected.DELETE("/roles/:name", roleHandler.DeleteRole)
+
+		// 图编排 / 工作流定义（图结构固定，业务字段保存在 graph_json 中）
+		protected.GET("/workflows/runs/pending", workflowHandler.ListPendingRuns)
+		protected.GET("/workflows/runs/:runId", workflowHandler.GetRun)
+		protected.POST("/workflows/runs/:runId/resume", workflowHandler.ResumeRun)
+		protected.GET("/workflows", workflowHandler.List)
+		protected.GET("/workflows/:id", workflowHandler.Get)
+		protected.POST("/workflows", workflowHandler.Create)
+		protected.PUT("/workflows/:id", workflowHandler.Update)
+		protected.DELETE("/workflows/:id", workflowHandler.Delete)
 
 		// Skills管理（具体路径需注册在 /skills/:name 之前）
 		protected.GET("/skills", skillsHandler.GetSkills)

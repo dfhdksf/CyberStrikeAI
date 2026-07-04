@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -388,9 +388,12 @@ func (db *DB) initTables() error {
 		status TEXT NOT NULL DEFAULT 'open',
 		vulnerability_type TEXT,
 		target TEXT,
-		proof TEXT,
+		preconditions TEXT,
+		reproduction_steps TEXT,
+		evidence TEXT,
 		impact TEXT,
 		recommendation TEXT,
+		retest_notes TEXT,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		project_id TEXT,
@@ -584,6 +587,53 @@ func (db *DB) initTables() error {
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);`
 
+	createWorkflowDefinitionsTable := `
+	CREATE TABLE IF NOT EXISTS workflow_definitions (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		description TEXT,
+		version INTEGER NOT NULL DEFAULT 1,
+		graph_json TEXT NOT NULL,
+		enabled INTEGER NOT NULL DEFAULT 1,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);`
+
+	createWorkflowRunsTable := `
+	CREATE TABLE IF NOT EXISTS workflow_runs (
+		id TEXT PRIMARY KEY,
+		workflow_id TEXT NOT NULL,
+		workflow_version INTEGER NOT NULL DEFAULT 1,
+		conversation_id TEXT,
+		project_id TEXT,
+		role_id TEXT,
+		status TEXT NOT NULL,
+		input_json TEXT,
+		output_json TEXT,
+		error TEXT,
+		pending_hitl_node_id TEXT,
+		pending_hitl_json TEXT,
+		started_at DATETIME NOT NULL,
+		finished_at DATETIME,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE SET NULL
+	);`
+
+	createWorkflowNodeRunsTable := `
+	CREATE TABLE IF NOT EXISTS workflow_node_runs (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		node_id TEXT NOT NULL,
+		status TEXT NOT NULL,
+		input_json TEXT,
+		output_json TEXT,
+		error TEXT,
+		started_at DATETIME NOT NULL,
+		finished_at DATETIME,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
+	);`
+
 	// 创建索引
 	createIndexes := `
 	CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);
@@ -642,6 +692,12 @@ func (db *DB) initTables() error {
 	CREATE INDEX IF NOT EXISTS idx_audit_logs_category ON audit_logs(category);
 	CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
 	CREATE INDEX IF NOT EXISTS idx_audit_logs_result ON audit_logs(result);
+	CREATE INDEX IF NOT EXISTS idx_workflow_definitions_updated_at ON workflow_definitions(updated_at);
+	CREATE INDEX IF NOT EXISTS idx_workflow_definitions_enabled ON workflow_definitions(enabled);
+	CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id);
+	CREATE INDEX IF NOT EXISTS idx_workflow_runs_conversation ON workflow_runs(conversation_id);
+	CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
+	CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_run ON workflow_node_runs(run_id);
 	`
 
 	if _, err := db.Exec(createConversationsTable); err != nil {
@@ -728,6 +784,16 @@ func (db *DB) initTables() error {
 	}
 
 	for tableName, ddl := range map[string]string{
+		"workflow_definitions": createWorkflowDefinitionsTable,
+		"workflow_runs":        createWorkflowRunsTable,
+		"workflow_node_runs":   createWorkflowNodeRunsTable,
+	} {
+		if _, err := db.Exec(ddl); err != nil {
+			return fmt.Errorf("创建%s表失败: %w", tableName, err)
+		}
+	}
+
+	for tableName, ddl := range map[string]string{
 		"c2_listeners": createC2ListenersTable,
 		"c2_sessions":  createC2SessionsTable,
 		"c2_tasks":     createC2TasksTable,
@@ -783,6 +849,9 @@ func (db *DB) initTables() error {
 	if err := db.migrateWebshellConnectionsTable(); err != nil {
 		db.logger.Warn("迁移webshell_connections表失败", zap.Error(err))
 		// 不返回错误，允许继续运行
+	}
+	if err := db.migrateWorkflowRunsTable(); err != nil {
+		db.logger.Warn("迁移workflow_runs表失败", zap.Error(err))
 	}
 
 	if _, err := db.Exec(createIndexes); err != nil {
@@ -1224,9 +1293,12 @@ func (db *DB) migrateVulnerabilitiesConversationFK() error {
 		status TEXT NOT NULL DEFAULT 'open',
 		vulnerability_type TEXT,
 		target TEXT,
-		proof TEXT,
+		preconditions TEXT,
+		reproduction_steps TEXT,
+		evidence TEXT,
 		impact TEXT,
 		recommendation TEXT,
+		retest_notes TEXT,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		project_id TEXT,
@@ -1239,12 +1311,15 @@ func (db *DB) migrateVulnerabilitiesConversationFK() error {
 	const copyRows = `
 	INSERT INTO vulnerabilities_new (
 		id, conversation_id, conversation_tag, task_tag, title, description,
-		severity, status, vulnerability_type, target, proof, impact, recommendation,
+		severity, status, vulnerability_type, target, preconditions, reproduction_steps,
+		evidence, impact, recommendation, retest_notes,
 		created_at, updated_at, project_id
 	)
 	SELECT
 		id, conversation_id, conversation_tag, task_tag, title, description,
-		severity, status, vulnerability_type, target, proof, impact, recommendation,
+		severity, status, vulnerability_type, target,
+		COALESCE(preconditions, ''), COALESCE(reproduction_steps, ''),
+		COALESCE(evidence, ''), impact, recommendation, COALESCE(retest_notes, ''),
 		created_at, updated_at, project_id
 	FROM vulnerabilities;`
 	if _, err := tx.Exec(copyRows); err != nil {
@@ -1315,6 +1390,10 @@ func (db *DB) migrateVulnerabilitiesTable() error {
 		{name: "conversation_tag", stmt: "ALTER TABLE vulnerabilities ADD COLUMN conversation_tag TEXT"},
 		{name: "task_tag", stmt: "ALTER TABLE vulnerabilities ADD COLUMN task_tag TEXT"},
 		{name: "project_id", stmt: "ALTER TABLE vulnerabilities ADD COLUMN project_id TEXT"},
+		{name: "preconditions", stmt: "ALTER TABLE vulnerabilities ADD COLUMN preconditions TEXT"},
+		{name: "reproduction_steps", stmt: "ALTER TABLE vulnerabilities ADD COLUMN reproduction_steps TEXT"},
+		{name: "evidence", stmt: "ALTER TABLE vulnerabilities ADD COLUMN evidence TEXT"},
+		{name: "retest_notes", stmt: "ALTER TABLE vulnerabilities ADD COLUMN retest_notes TEXT"},
 	}
 
 	for _, col := range columns {

@@ -333,6 +333,19 @@ const responseStreamStateByProgressId = new Map();
 // 主通道当前迭代轮次缓存：progressId -> { iteration, orchestration }
 const mainIterationStateByProgressId = new Map();
 
+/** 图编排多 Agent 节点切换时清空流式聚合，避免推理/输出条目覆盖上一节点内容 */
+function clearTimelineStreamStates(progressId) {
+    responseStreamStateByProgressId.delete(progressId);
+    thinkingStreamStateByProgressId.delete(progressId);
+    einoAgentReplyStreamStateByProgressId.delete(progressId);
+    const prefix = String(progressId) + '::';
+    for (const key of Array.from(toolResultStreamStateByKey.keys())) {
+        if (String(key).startsWith(prefix)) {
+            toolResultStreamStateByKey.delete(key);
+        }
+    }
+}
+
 /** 同一段主通道流式输出（Eino 可能重复 response_start） */
 function sameMainResponseStreamMeta(a, b) {
     if (!a || !b) return false;
@@ -341,7 +354,10 @@ function sameMainResponseStreamMeta(a, b) {
     if (!agentA || agentA !== agentB) return false;
     const orchA = String(a.orchestration != null ? a.orchestration : '').trim();
     const orchB = String(b.orchestration != null ? b.orchestration : '').trim();
-    return orchA === orchB;
+    if (orchA !== orchB) return false;
+    const nodeA = String(a.workflowNodeId != null ? a.workflowNodeId : '').trim();
+    const nodeB = String(b.workflowNodeId != null ? b.workflowNodeId : '').trim();
+    return nodeA === nodeB;
 }
 
 function resolveMainIterationTag(progressId, responseData) {
@@ -366,7 +382,8 @@ function buildMainResponseStreamIdentity(progressId, responseData) {
     const agent = String(d.einoAgent != null ? d.einoAgent : '').trim();
     const orch = String(d.orchestration != null ? d.orchestration : '').trim();
     const iterTag = resolveMainIterationTag(progressId, d);
-    return agent + '|' + orch + '|iter=' + iterTag;
+    const nodeId = String(d.workflowNodeId != null ? d.workflowNodeId : '').trim();
+    return agent + '|' + orch + '|iter=' + iterTag + '|wfNode=' + nodeId;
 }
 
 function extractIterationTagFromStreamIdentity(identity) {
@@ -1747,13 +1764,18 @@ function handleStreamEvent(event, progressElement, progressId,
             if (scope !== 'sub') {
                 const prevMainIter = mainIterationStateByProgressId.get(String(progressId));
                 const prevN = prevMainIter && prevMainIter.iteration != null ? prevMainIter.iteration : null;
+                const prevNode = prevMainIter && prevMainIter.workflowNodeId != null
+                    ? String(prevMainIter.workflowNodeId).trim()
+                    : '';
+                const curNode = d.workflowNodeId != null ? String(d.workflowNodeId).trim() : '';
                 mainIterationStateByProgressId.set(String(progressId), {
                     iteration: n,
-                    orchestration: d.orchestration != null ? d.orchestration : ''
+                    orchestration: d.orchestration != null ? d.orchestration : '',
+                    workflowNodeId: curNode
                 });
-                // 主通道进入新轮次后不复用上一轮的「执行输出」时间线条目
-                if (prevN != null && prevN !== n) {
-                    responseStreamStateByProgressId.delete(progressId);
+                // 主通道进入新轮次或图编排切换到新 Agent 节点后，不复用上一段的流式时间线条目
+                if (prevN != null && (n < prevN || prevN !== n || (curNode && prevNode && curNode !== prevNode))) {
+                    clearTimelineStreamStates(progressId);
                 }
             }
             let iterTitle;
@@ -1781,6 +1803,147 @@ function handleStreamEvent(event, progressElement, progressId,
                 message: event.message,
                 data: event.data,
                 iterationN: n
+            });
+            break;
+        }
+
+        case 'workflow_start': {
+            const d = event.data || {};
+            const name = d.workflowName || d.workflowId || '';
+            addTimelineItem(timeline, 'workflow_start', {
+                title: '🧭 工作流开始' + (name ? (' · ' + name) : ''),
+                message: event.message || '',
+                data: d
+            });
+            break;
+        }
+
+        case 'workflow_done': {
+            const d = event.data || {};
+            const name = d.workflowName || d.workflowId || '';
+            addTimelineItem(timeline, 'workflow_done', {
+                title: '✅ 工作流完成' + (name ? (' · ' + name) : ''),
+                message: event.message || '',
+                data: d
+            });
+            break;
+        }
+
+        case 'workflow_node_start': {
+            const d = event.data || {};
+            const label = d.label || d.nodeId || '';
+            const nodeType = d.nodeType != null ? String(d.nodeType).toLowerCase() : '';
+            if (nodeType === 'agent') {
+                clearTimelineStreamStates(progressId);
+            }
+            addTimelineItem(timeline, 'workflow_node_start', {
+                title: '▶ 节点开始' + (label ? (' · ' + label) : ''),
+                message: event.message || '',
+                data: d
+            });
+            break;
+        }
+
+        case 'workflow_node_result': {
+            const d = event.data || {};
+            const label = d.label || d.nodeId || '';
+            const status = d.status || '';
+            const nodeType = d.nodeType != null ? String(d.nodeType).toLowerCase() : '';
+            let title;
+            if (nodeType === 'condition') {
+                const matched = d.matched === true || d.matched === 'true' || (d.output && (d.output.matched === true || d.output.matched === 'true'));
+                title = (matched ? '✅' : '🔀') + ' 条件判断' + (label ? (' · ' + label) : '') + ' → ' + (matched ? '是' : '否');
+            } else {
+                const icon = status === 'failed' ? '❌' : (status === 'skipped' ? '⏭️' : '✅');
+                title = icon + ' 节点完成' + (label ? (' · ' + label) : '') + (status ? ('（' + status + '）') : '');
+            }
+            addTimelineItem(timeline, 'workflow_node_result', {
+                title: title,
+                message: event.message || '',
+                data: d
+            });
+            break;
+        }
+
+        case 'workflow_branch_taken':
+        case 'workflow_branch_skipped': {
+            const d = event.data || {};
+            const branch = d.branchLabel || '';
+            const target = d.targetLabel || d.targetId || '';
+            const taken = event.type === 'workflow_branch_taken';
+            addTimelineItem(timeline, event.type, {
+                title: (taken ? '➡️' : '⏭️') + (taken ? ' 执行分支' : ' 跳过分支') + (branch ? (' · ' + branch) : '') + (target ? (' → ' + target) : ''),
+                message: event.message || '',
+                data: d
+            });
+            break;
+        }
+
+        case 'workflow_tool_start': {
+            const d = event.data || {};
+            const tool = d.tool || d.toolName || '';
+            addTimelineItem(timeline, 'workflow_tool_start', {
+                title: '🔧 工具节点' + (tool ? (' · ' + tool) : ''),
+                message: event.message || '',
+                data: d
+            });
+            break;
+        }
+
+        case 'workflow_agent_output': {
+            const d = event.data || {};
+            const label = d.label || d.nodeId || '';
+            addTimelineItem(timeline, 'workflow_agent_output', {
+                title: '🤖 Agent 输出' + (label ? (' · ' + label) : ''),
+                message: event.message || '',
+                data: d
+            });
+            break;
+        }
+
+        case 'workflow_hitl_checkpoint': {
+            addTimelineItem(timeline, 'workflow_hitl_checkpoint', {
+                title: '🧑‍⚖️ 人工确认检查点',
+                message: event.message || '',
+                data: event.data || {}
+            });
+            break;
+        }
+
+        case 'workflow_hitl_waiting': {
+            const d = event.data || {};
+            const hitlItemId = addTimelineItem(timeline, 'workflow_hitl_waiting', {
+                title: '🧑‍⚖️ 工作流等待审批',
+                message: event.message || '',
+                data: d
+            });
+            renderInlineWorkflowHitlApproval(hitlItemId, d);
+            break;
+        }
+
+        case 'workflow_hitl_resumed': {
+            addTimelineItem(timeline, 'workflow_hitl_resumed', {
+                title: '✅ 审批已通过',
+                message: event.message || '人工审批已通过，继续执行',
+                data: event.data || {}
+            });
+            break;
+        }
+
+        case 'workflow_hitl_rejected': {
+            addTimelineItem(timeline, 'workflow_hitl_rejected', {
+                title: '❌ 审批已拒绝',
+                message: event.message || '',
+                data: event.data || {}
+            });
+            break;
+        }
+
+        case 'workflow_paused': {
+            addTimelineItem(timeline, 'workflow_paused', {
+                title: '⏸️ 工作流已暂停',
+                message: event.message || '',
+                data: event.data || {}
             });
             break;
         }
@@ -2542,6 +2705,16 @@ function handleStreamEvent(event, progressElement, progressId,
             break;
             
         case 'done':
+            if (event.data && event.data.workflowStatus === 'awaiting_hitl') {
+                const waitingTitle = document.querySelector(`#${progressId} .progress-title`);
+                if (waitingTitle) {
+                    waitingTitle.textContent = '⏸️ ' + (typeof window.t === 'function' ? window.t('chat.workflowAwaitingApproval') : '工作流等待审批');
+                }
+                if (progressTaskState.has(progressId)) {
+                    finalizeProgressTask(progressId, typeof window.t === 'function' ? window.t('chat.workflowAwaitingApproval') : '等待审批');
+                }
+                break;
+            }
             // 清理流式输出状态
             responseStreamStateByProgressId.delete(progressId);
             mainIterationStateByProgressId.delete(String(progressId));
@@ -2709,6 +2882,210 @@ function renderInlineHitlApproval(itemId, data) {
     rejectBtn.onclick = function () { submit('reject'); };
 }
 
+function renderInlineWorkflowHitlApproval(itemId, data) {
+    const item = document.getElementById(itemId);
+    if (!item || !data) return;
+    const runId = data.workflowRunId || data.workflow_run_id;
+    if (!runId) return;
+    let contentEl = item.querySelector('.timeline-item-content');
+    if (!contentEl) {
+        contentEl = document.createElement('div');
+        contentEl.className = 'timeline-item-content';
+        item.appendChild(contentEl);
+    }
+    const existingPanel = contentEl.querySelector('.workflow-hitl-inline-approval');
+    if (existingPanel) existingPanel.remove();
+
+    const label = data.label || data.nodeId || runId;
+    const prompt = data.prompt || '';
+    const panel = document.createElement('div');
+    panel.className = 'workflow-hitl-inline-approval hitl-inline-approval';
+    panel.innerHTML = `
+        <div class="hitl-input-help"><strong>${escapeHtml(label)}</strong> 等待人工审批。</div>
+        ${prompt ? `<div class="hitl-input-help">${escapeHtml(prompt)}</div>` : ''}
+        <div class="hitl-input-help">备注（可选）</div>
+        <input class="hitl-config-input workflow-hitl-inline-comment" type="text" placeholder="审批意见">
+        <div class="hitl-pending-actions">
+            <button class="btn-secondary workflow-hitl-inline-reject">拒绝</button>
+            <button class="btn-primary workflow-hitl-inline-approve">通过</button>
+        </div>
+        <div class="hitl-input-help workflow-hitl-inline-status"></div>
+    `;
+    contentEl.appendChild(panel);
+
+    const approveBtn = panel.querySelector('.workflow-hitl-inline-approve');
+    const rejectBtn = panel.querySelector('.workflow-hitl-inline-reject');
+    const commentInput = panel.querySelector('.workflow-hitl-inline-comment');
+    const statusEl = panel.querySelector('.workflow-hitl-inline-status');
+
+    const setBusy = function (busy) {
+        approveBtn.disabled = busy;
+        rejectBtn.disabled = busy;
+    };
+
+    const submit = async function (approved) {
+        setBusy(true);
+        const comment = String(commentInput.value || '').trim();
+        try {
+            const fetchFn = typeof apiFetch === 'function' ? apiFetch : fetch;
+            const response = await fetchFn(`/api/workflows/runs/${encodeURIComponent(runId)}/resume`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ approved: approved, comment: comment })
+            });
+            const body = response && typeof response.json === 'function' ? await response.json() : null;
+            if (!response || !response.ok) {
+                statusEl.textContent = (body && body.error) ? body.error : '提交失败，请重试';
+                setBusy(false);
+                return;
+            }
+            if (body && body.streamResuming) {
+                statusEl.textContent = approved ? '已通过，工作流继续执行中…' : '已拒绝';
+                panel.classList.add('hitl-inline-done');
+                return;
+            }
+            statusEl.textContent = approved ? '已通过，工作流继续执行' : '已拒绝';
+            panel.classList.add('hitl-inline-done');
+        } catch (e) {
+            statusEl.textContent = '提交失败：' + (e && e.message ? e.message : 'unknown error');
+            setBusy(false);
+        }
+    };
+
+    approveBtn.onclick = function () { submit(true); };
+    rejectBtn.onclick = function () { submit(false); };
+}
+
+function parseWorkflowHitlPendingJSON(raw) {
+    if (!raw) return {};
+    if (typeof raw === 'object') return raw;
+    try {
+        const o = JSON.parse(String(raw));
+        return o && typeof o === 'object' ? o : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function workflowHitlDataFromRun(run) {
+    if (!run) return null;
+    const runId = run.id || run.workflowRunId || run.workflow_run_id;
+    if (!runId) return null;
+    const pending = parseWorkflowHitlPendingJSON(run.pending_hitl_json || run.pendingHitlJson || run.pendingHitlJSON);
+    const pendingHitl = pending.pendingHitl && typeof pending.pendingHitl === 'object' ? pending.pendingHitl : pending;
+    return {
+        workflowRunId: String(runId),
+        nodeId: pendingHitl.nodeId || run.pending_hitl_node_id || run.pendingHitlNodeId || '',
+        label: pendingHitl.label || pendingHitl.nodeId || run.pending_hitl_node_id || run.pendingHitlNodeId || runId,
+        prompt: pendingHitl.prompt || '',
+        conversationId: run.conversation_id || run.conversationId || ''
+    };
+}
+
+function findWorkflowHitlTimelineItem(detailsContainer, runId) {
+    if (!detailsContainer || !runId) return null;
+    const rid = String(runId).trim();
+    const byRun = detailsContainer.querySelector('[data-workflow-run-id="' + hitlEscapeAttrSelector(rid) + '"]');
+    if (byRun) return byRun;
+    const items = detailsContainer.querySelectorAll('.timeline-item-workflow_hitl_waiting');
+    for (let i = items.length - 1; i >= 0; i--) {
+        const el = items[i];
+        if (!el.querySelector('.workflow-hitl-inline-approval.hitl-inline-done')) {
+            return el;
+        }
+    }
+    return items.length ? items[items.length - 1] : null;
+}
+
+/**
+ * 刷新或切换会话后：根据 workflow_runs(awaiting_hitl) 恢复工作流内联审批入口。
+ */
+async function restoreWorkflowHitlInlineForConversation(conversationId) {
+    if (!conversationId || typeof apiFetch !== 'function') return;
+    if (typeof window.currentConversationId === 'string' && window.currentConversationId !== conversationId) {
+        return;
+    }
+    try {
+        const resp = await apiFetch('/api/workflows/runs/pending?conversationId=' + encodeURIComponent(conversationId));
+        if (!resp.ok) return;
+        const data = await resp.json().catch(function () { return {}; });
+        const runs = Array.isArray(data.runs) ? data.runs : [];
+        if (!runs.length) return;
+
+        let msgEl = document.querySelector('#chat-messages [data-backend-message-id]');
+        const nodes = document.querySelectorAll('#chat-messages .message.assistant');
+        for (let i = nodes.length - 1; i >= 0; i--) {
+            if (nodes[i] && nodes[i].dataset && nodes[i].dataset.backendMessageId) {
+                msgEl = nodes[i];
+                break;
+            }
+        }
+        if (!msgEl || !msgEl.id) return;
+        const clientMsgId = msgEl.id;
+        const backendMsgId = msgEl.dataset.backendMessageId;
+        const detailsContainer = document.getElementById('process-details-' + clientMsgId);
+        if (!detailsContainer) return;
+
+        if (detailsContainer.dataset.lazyNotLoaded === '1' && detailsContainer.dataset.loaded !== '1') {
+            try {
+                detailsContainer.dataset.loading = '1';
+                if (typeof loadProcessDetailsPaginated === 'function') {
+                    await loadProcessDetailsPaginated(clientMsgId, backendMsgId);
+                } else if (typeof apiFetch === 'function' && backendMsgId) {
+                    const res = await apiFetch('/api/messages/' + encodeURIComponent(backendMsgId) + '/process-details');
+                    const j = await res.json().catch(function () { return {}; });
+                    if (res.ok && typeof renderProcessDetails === 'function') {
+                        renderProcessDetails(clientMsgId, (j && Array.isArray(j.processDetails)) ? j.processDetails : []);
+                    }
+                }
+            } catch (e) {
+                console.error('加载过程详情失败（工作流 HITL 恢复）:', e);
+            } finally {
+                detailsContainer.dataset.loading = '0';
+            }
+        }
+
+        expandProcessDetailsTimeline(clientMsgId);
+
+        for (let i = 0; i < runs.length; i++) {
+            const hitlData = workflowHitlDataFromRun(runs[i]);
+            if (!hitlData) continue;
+            let hitlItemEl = findWorkflowHitlTimelineItem(detailsContainer, hitlData.workflowRunId);
+            if (!hitlItemEl) {
+                const timeline = detailsContainer.querySelector('.progress-timeline');
+                if (timeline && typeof addTimelineItem === 'function') {
+                    const itemId = addTimelineItem(timeline, 'workflow_hitl_waiting', {
+                        title: '🧑‍⚖️ 工作流等待审批',
+                        message: hitlData.label || '',
+                        data: hitlData
+                    });
+                    hitlItemEl = document.getElementById(itemId);
+                }
+            }
+            if (hitlItemEl && hitlItemEl.id) {
+                renderInlineWorkflowHitlApproval(hitlItemEl.id, hitlData);
+            }
+        }
+    } catch (e) {
+        console.error('restoreWorkflowHitlInlineForConversation failed', e);
+    }
+}
+
+window.restoreWorkflowHitlInlineForConversation = restoreWorkflowHitlInlineForConversation;
+window.submitWorkflowHitlDecision = async function submitWorkflowHitlDecision(runId, approved, comment) {
+    const fetchFn = typeof apiFetch === 'function' ? apiFetch : fetch;
+    const response = await fetchFn('/api/workflows/runs/' + encodeURIComponent(String(runId)) + '/resume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approved: !!approved, comment: comment || '' })
+    });
+    const body = response && typeof response.json === 'function' ? await response.json() : null;
+    if (!response || !response.ok) {
+        throw new Error((body && body.error) ? body.error : '提交失败');
+    }
+    return body;
+};
+
 function hitlEscapeAttrSelector(val) {
     const s = String(val);
     if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
@@ -2831,6 +3208,9 @@ async function restoreHitlInlineForConversation(conversationId) {
             }
             if (!hitlItemEl) continue;
             renderInlineHitlApproval(hitlItemEl.id, hitlData);
+        }
+        if (typeof restoreWorkflowHitlInlineForConversation === 'function') {
+            await restoreWorkflowHitlInlineForConversation(conversationId);
         }
     } catch (e) {
         console.error('restoreHitlInlineForConversation failed', e);
@@ -3262,6 +3642,34 @@ function updateToolCallStatus(progressId, toolCallId, status) {
 }
 
 // 添加时间线项目
+function buildWorkflowConditionResultHtml(data) {
+    const output = (data && data.output) || {};
+    const expr = (data && data.expression) || output.condition || '';
+    const matched = (data && (data.matched === true || data.matched === 'true'))
+        || output.matched === true || output.matched === 'true';
+    const branchText = matched ? '是（true）' : '否（false）';
+    const branchClass = matched ? 'is-true' : 'is-false';
+    return `<div class="timeline-item-content workflow-condition-result">
+        <div class="workflow-condition-row">
+            <span class="workflow-agent-io-label">表达式</span>
+            <code>${escapeHtml(String(expr || '（空）'))}</code>
+        </div>
+        <div class="workflow-condition-row">
+            <span class="workflow-agent-io-label">结果</span>
+            <span class="workflow-condition-branch ${branchClass}">${escapeHtml(branchText)}</span>
+        </div>
+    </div>`;
+}
+
+function buildWorkflowBranchDetailHtml(data) {
+    const cond = (data && data.edgeCondition) || '';
+    if (!cond) return '';
+    return `<div class="timeline-item-content workflow-branch-detail">
+        <span class="workflow-agent-io-label">连线条件</span>
+        <code>${escapeHtml(cond)}</code>
+    </div>`;
+}
+
 function addTimelineItem(timeline, type, options) {
     const item = document.createElement('div');
     // 生成唯一ID
@@ -3299,6 +3707,12 @@ function addTimelineItem(timeline, type, options) {
     }
     if (type === 'hitl_interrupt' && options.data && options.data.interruptId != null && String(options.data.interruptId).trim() !== '') {
         item.dataset.hitlInterruptId = String(options.data.interruptId).trim();
+    }
+    if (type === 'workflow_hitl_waiting' && options.data) {
+        const runId = options.data.workflowRunId || options.data.workflow_run_id;
+        if (runId != null && String(runId).trim() !== '') {
+            item.dataset.workflowRunId = String(runId).trim();
+        }
     }
     if (type === 'tool_result' && options.data) {
         const d = options.data;
@@ -3382,8 +3796,35 @@ function addTimelineItem(timeline, type, options) {
                 </div>
             </div>
         `;
-    } else if (type === 'eino_agent_reply' && options.message) {
-        content += `<div class="timeline-item-content">${formatMarkdown(options.message, timelineMarkdownOpts)}</div>`;
+    } else if ((type === 'eino_agent_reply' || type === 'workflow_agent_output') && options.message) {
+        let prefix = '';
+        if (type === 'workflow_agent_output' && options.data) {
+            const source = options.data.inputSource || '';
+            const preview = options.data.inputPreview || '';
+            if (source || preview) {
+                const previewText = String(preview || '').trim();
+                const summaryPreview = previewText.length > 80 ? (previewText.slice(0, 80) + '...') : previewText;
+                prefix = `<details class="workflow-agent-input">
+                    <summary>
+                        <span class="workflow-agent-io-label">输入</span>
+                        ${source ? `<code>${escapeHtml(source)}</code>` : ''}
+                        ${summaryPreview ? `<span class="workflow-agent-input-summary">${escapeHtml(summaryPreview)}</span>` : ''}
+                    </summary>
+                    ${previewText ? `<pre>${escapeHtml(previewText)}</pre>` : '<div class="workflow-agent-empty">暂无输入预览</div>'}
+                </details>`;
+            }
+        }
+        const body = type === 'workflow_agent_output'
+            ? `<div class="workflow-agent-output">
+                <div class="workflow-agent-io-label">输出</div>
+                <div class="workflow-agent-output-body">${formatMarkdown(options.message, timelineMarkdownOpts)}</div>
+            </div>`
+            : formatMarkdown(options.message, timelineMarkdownOpts);
+        content += `<div class="timeline-item-content workflow-agent-io">${prefix}${body}</div>`;
+    } else if (type === 'workflow_node_result' && options.data && String(options.data.nodeType || '').toLowerCase() === 'condition') {
+        content += buildWorkflowConditionResultHtml(options.data);
+    } else if ((type === 'workflow_branch_taken' || type === 'workflow_branch_skipped') && options.data) {
+        content += buildWorkflowBranchDetailHtml(options.data);
     } else if (type === 'tool_result' && options.data) {
         const data = options.data;
         const isError = data.isError || !data.success;
