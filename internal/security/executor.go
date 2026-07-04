@@ -71,7 +71,7 @@ func (e *Executor) buildToolIndex() {
 	)
 }
 
-// ExecuteTool 执行安全工具
+// ExecuteTool 执行安全工具,Handler 闭包最终调用这里：
 func (e *Executor) ExecuteTool(ctx context.Context, toolName string, args map[string]interface{}) (*mcp.ToolResult, error) {
 	e.logger.Info("ExecuteTool被调用",
 		zap.String("toolName", toolName),
@@ -110,7 +110,7 @@ func (e *Executor) ExecuteTool(ctx context.Context, toolName string, args map[st
 		return e.executeInternalTool(ctx, toolName, toolConfig.Command, args)
 	}
 
-	// 构建命令 - 根据工具类型使用不同的参数格式
+	// 构建命令参数（YAML parameters → CLI flags） - 根据工具类型使用不同的参数格式
 	cmdArgs := e.buildCommandArgs(toolName, toolConfig, args)
 
 	e.logger.Info("构建命令参数完成",
@@ -136,7 +136,7 @@ func (e *Executor) ExecuteTool(ctx context.Context, toolName string, args map[st
 		}, nil
 	}
 
-	// 执行命令
+	// 执行OS命令
 	cmd := exec.CommandContext(ctx, toolConfig.Command, cmdArgs...)
 	applyDefaultTerminalEnv(cmd)
 	attachNonInteractiveStdin(cmd)
@@ -150,8 +150,10 @@ func (e *Executor) ExecuteTool(ctx context.Context, toolName string, args map[st
 	var output string
 	var err error
 	// 如果上层提供了 stdout/stderr 增量回调，则边执行边读取并回调。
+	// 流式输出回调（SSE 实时推送给前端）
 	if cb, ok := ctx.Value(ToolOutputCallbackCtxKey).(ToolOutputCallback); ok && cb != nil {
 		output, err = streamCommandOutput(ctx, cmd, cb, ResolveShellNoOutputTimeoutSeconds(e.shellNoOutputTimeoutSec))
+		// 需要 TTY 的工具自动用 PTY 重试
 		if err != nil && shouldRetryWithPTY(output) {
 			e.logger.Info("检测到工具需要 TTY，使用 PTY 重试",
 				zap.String("tool", toolName),

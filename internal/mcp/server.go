@@ -32,8 +32,8 @@ type MonitorStorage interface {
 // Server MCP服务器
 type Server struct {
 	tools                 map[string]ToolHandler
-	toolDefs              map[string]Tool // 工具定义
-	executions            map[string]*ToolExecution
+	toolDefs              map[string]Tool           // 工具定义
+	executions            map[string]*ToolExecution //
 	stats                 map[string]*ToolStats
 	prompts               map[string]*Prompt   // 提示词模板
 	resources             map[string]*Resource // 资源
@@ -132,8 +132,8 @@ func (s *Server) effectiveHTTPToolCallDeadline() (context.Context, context.Cance
 func (s *Server) RegisterTool(tool Tool, handler ToolHandler) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.tools[tool.Name] = handler
-	s.toolDefs[tool.Name] = tool
+	s.tools[tool.Name] = handler // 存处理函数
+	s.toolDefs[tool.Name] = tool // 存定义（给 LLM 用）
 
 	// 自动为工具创建资源文档
 	resourceURI := fmt.Sprintf("tool://%s", tool.Name)
@@ -809,6 +809,7 @@ func (s *Server) GetAllTools() []Tool {
 
 // CallTool 直接调用工具（用于内部调用）
 func (s *Server) CallTool(ctx context.Context, toolName string, args map[string]interface{}) (*ToolResult, string, error) {
+	// ═══ 能力 1: 注册表查找 ═══
 	s.mu.RLock()
 	handler, exists := s.tools[toolName]
 	s.mu.RUnlock()
@@ -817,7 +818,7 @@ func (s *Server) CallTool(ctx context.Context, toolName string, args map[string]
 		return nil, "", fmt.Errorf("工具 %s 未找到", toolName)
 	}
 
-	// 创建执行记录
+	// ═══ 能力 2: 执行记录（审计追踪） ═══
 	executionID := uuid.New().String()
 	execution := &ToolExecution{
 		ID:        executionID,
@@ -832,27 +833,29 @@ func (s *Server) CallTool(ctx context.Context, toolName string, args map[string]
 	// 如果内存中的执行记录超过限制，清理最旧的记录
 	s.cleanupOldExecutions()
 	s.mu.Unlock()
-
+	// 持久化到 SQLite
 	if s.storage != nil {
 		if err := s.storage.SaveToolExecution(execution); err != nil {
 			s.logger.Warn("保存执行记录到数据库失败", zap.Error(err))
 		}
 	}
-
+	// ═══ 能力 3: 取消支持（从 UI 取消正在执行的工具） ═══
 	execCtx, runCancel := context.WithCancel(ctx)
-	s.registerRunningCancel(executionID, runCancel)
+	s.registerRunningCancel(executionID, runCancel) // 存 cancel func，UI 可调用
 	notifyToolRunBegin(ctx, executionID)
 	defer func() {
 		notifyToolRunEnd(ctx, executionID)
 		runCancel()
 		s.unregisterRunningCancel(executionID)
 	}()
-
+	// ═══ 能力 4: 实际执行 ═══
 	result, err := handler(execCtx, args)
+	// ═══ 能力 5: 终止说明（用户从监控页终止时附带的说明文字） ═══
 	cancelledWithUserNote := s.applyAbortUserNoteToCancelledToolResult(executionID, &result, &err)
 
 	s.mu.Lock()
 	now := time.Now()
+	// ═══ 能力 6: 状态更新 + 持久化 ═══
 	execution.EndTime = &now
 	execution.Duration = now.Sub(execution.StartTime)
 	var failed bool
@@ -906,7 +909,8 @@ func (s *Server) CallTool(ctx context.Context, toolName string, args map[string]
 		}
 	}
 
-	s.updateStats(toolName, failed)
+	// ═══ 能力 7: 统计更新 ═══
+	s.updateStats(toolName, failed) // 成功/失败计数，最后调用时间
 
 	if s.storage != nil {
 		s.mu.Lock()

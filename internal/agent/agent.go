@@ -91,15 +91,15 @@ func NewAgent(cfg *config.OpenAIConfig, agentCfg *config.AgentConfig, mcpServer 
 	llmClient := openai.NewClient(cfg, httpClient, logger)
 
 	return &Agent{
-		openAIClient:         llmClient,
-		config:               cfg,
-		agentConfig:          agentCfg,
-		mcpServer:            mcpServer,
-		externalMCPMgr:       externalMCPMgr,
-		logger:               logger,
-		maxIterations:        maxIterations,
-		toolNameMapping:      make(map[string]string), // 初始化工具名称映射
-		toolDescriptionMode:  "short",
+		openAIClient:        llmClient,
+		config:              cfg,
+		agentConfig:         agentCfg,
+		mcpServer:           mcpServer,
+		externalMCPMgr:      externalMCPMgr,
+		logger:              logger,
+		maxIterations:       maxIterations,
+		toolNameMapping:     make(map[string]string), // 初始化工具名称映射
+		toolDescriptionMode: "short",
 	}
 }
 
@@ -312,7 +312,7 @@ func (a *Agent) getAvailableTools(roleTools []string) []Tool {
 		}
 	}
 
-	// 从MCP服务器获取所有已注册的内部工具
+	// 从MCP服务器获取所有已注册的所有 mcp.Tool 定义，转为 OpenAI function-calling 格式发给 LLM。
 	mcpTools := a.mcpServer.GetAllTools()
 
 	// 转换为OpenAI格式的工具定义
@@ -543,6 +543,7 @@ func (a *Agent) executeToolViaMCP(ctx context.Context, toolName string, args map
 	var executionID string
 	var err error
 
+	// 1. 超时控制
 	// 单次工具执行超时：防止单个工具长时间挂起（如 30 分钟仍显示执行中）
 	toolCtx := ctx
 	var toolCancel context.CancelFunc
@@ -557,6 +558,7 @@ func (a *Agent) executeToolViaMCP(ctx context.Context, toolName string, args map
 	// C2 危险任务 HITL 异步等待：须绑定整条 Agent 运行期 ctx，而非单次工具子 ctx（return 时会被 cancel）
 	toolCtx = c2.WithHITLRunContext(toolCtx, ctx)
 
+	// 2. 区分内部/外部工具
 	// 检查是否是外部MCP工具（通过工具名称映射）
 	a.mu.RLock()
 	originalToolName, isExternalTool := a.toolNameMapping[toolName]
