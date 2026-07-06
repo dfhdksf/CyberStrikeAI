@@ -581,7 +581,7 @@ func (a *Agent) executeToolViaMCP(ctx context.Context, toolName string, args map
 		detail := err.Error()
 		if errors.Is(err, context.Canceled) {
 			detail = "工具调用已被手动终止（MCP 监控页）。智能体将携带此结果继续后续步骤，整条任务不会因此被停止。"
-		} else if errors.Is(err, context.DeadlineExceeded) {
+		} else if errors.Is(err, context.DeadlineExceeded) { //工具执行超时
 			min := 10
 			if a.agentConfig != nil && a.agentConfig.ToolTimeoutMinutes > 0 {
 				min = a.agentConfig.ToolTimeoutMinutes

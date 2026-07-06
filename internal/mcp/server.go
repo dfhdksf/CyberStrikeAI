@@ -1126,6 +1126,7 @@ func (s *Server) takeAbortUserNote(id string) string {
 
 // applyAbortUserNoteToCancelledToolResult 监控页「终止并填写说明」时合并「工具已输出 + 用户说明」交给模型。
 // exec 等工具会把失败写在 *ToolResult 里并返回 err==nil，若仅在 err!=nil 时合并会漏掉说明，甚至误 clear 掉 note。
+// 用户终止时可以填一 说明（比如"这个扫描太慢了，换个思路"），系统会把"工具部分输出 + 用户说明"合并给 LLM。
 func (s *Server) applyAbortUserNoteToCancelledToolResult(executionID string, result **ToolResult, err *error) (cancelledWithUserNote bool) {
 	note := strings.TrimSpace(s.readAbortUserNote(executionID))
 	if note == "" {

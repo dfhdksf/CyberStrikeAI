@@ -21,6 +21,8 @@ type ExecutionRecorder func(executionID, toolCallID string)
 
 // ToolErrorPrefix 用于把内部 MCP 执行结果中的 IsError 标记传递到多代理上层。
 // Eino 工具通道目前只支持返回字符串，因此通过前缀标识，随后在多代理 runner 中解析为 success/isError。
+// 工具失败时返回 ToolErrorPrefix + 错误文本，上层解析： 有前缀 → 标记 IsError = true，UI 显示红色 ;展示时脱掉前缀，只显示错误正文
+// 这样在 Eino 的字符串通道里也能保留 IsError 语义。
 const ToolErrorPrefix = "__CYBERSTRIKE_AI_TOOL_ERROR__\n"
 
 // ToolsFromDefinitions 将单 Agent 使用的 OpenAI 风格工具定义转为 Eino InvokableTool，执行时走 Agent 的 MCP 路径。
@@ -45,14 +47,14 @@ func ToolsFromDefinitions(
 			return nil, fmt.Errorf("tool %q: %w", d.Function.Name, err)
 		}
 		out = append(out, &mcpBridgeTool{
-			info:           info,
-			name:           d.Function.Name,
-			agent:          ag,
-			holder:         holder,
-			record:         rec,
-			chunk:          toolOutputChunk,
-			invokeNotify:   invokeNotify,
-			einoAgentName:  strings.TrimSpace(einoAgentName),
+			info:          info,
+			name:          d.Function.Name,
+			agent:         ag,
+			holder:        holder,
+			record:        rec,
+			chunk:         toolOutputChunk,
+			invokeNotify:  invokeNotify,
+			einoAgentName: strings.TrimSpace(einoAgentName),
 		})
 	}
 	return out, nil
@@ -136,6 +138,7 @@ func runMCPToolInvocation(
 	var args map[string]interface{}
 	if argumentsInJSON != "" && argumentsInJSON != "null" {
 		if err := json.Unmarshal([]byte(argumentsInJSON), &args); err != nil {
+			//JSON 参数解析失败返回 ToolErrorPrefix + 错误文本——通过前缀标记这是错误结果，但 Go error 为 nil，图继续跑。
 			// Return soft error (nil error) so the eino graph continues and the LLM can self-correct,
 			// instead of a hard error that terminates the iteration loop.
 			return ToolErrorPrefix + fmt.Sprintf(
@@ -190,7 +193,7 @@ func runMCPToolInvocation(
 // UnknownToolReminderHandler 供 compose.ToolsNodeConfig.UnknownToolsHandler 使用：
 // 模型请求了未注册的工具名时，返回一个「软错误」工具结果（nil error），
 // 让模型在同一轮继续自我修正，避免触发 run-loop 级别的 full rerun。
-// 不进行名称猜测或映射，避免误执行。
+// 不进行名称猜测或映射，避免误执行。只是把错误文本塞进工具结果，LLM 下一轮自我修正。
 func UnknownToolReminderHandler() func(ctx context.Context, name, input string) (string, error) {
 	return func(ctx context.Context, name, input string) (string, error) {
 		_ = ctx

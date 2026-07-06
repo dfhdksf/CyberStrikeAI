@@ -179,6 +179,7 @@ func (e *Executor) ExecuteTool(ctx context.Context, toolName string, args map[st
 	if err != nil {
 		// 检查退出码是否在允许列表中
 		exitCode := getExitCode(err)
+		//比如 nmap 在"没有主机存活"时返回非零码，一般零码为成功,但 YAML 配置里可以声明这是允许的,例如返回1表示没有主机存活,工具是执行成功的
 		if exitCode != nil && toolConfig.AllowedExitCodes != nil {
 			for _, allowedCode := range toolConfig.AllowedExitCodes {
 				if *exitCode == allowedCode {
@@ -194,7 +195,7 @@ func (e *Executor) ExecuteTool(ctx context.Context, toolName string, args map[st
 								Text: string(output),
 							},
 						},
-						IsError: false,
+						IsError: false, //退出码在允许列表内,视为成功
 					}, nil
 				}
 			}

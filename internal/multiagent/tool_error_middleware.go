@@ -88,6 +88,10 @@ func softRecoveryToolMiddleware() compose.ToolMiddleware {
 // propagate as hard errors that terminate the orchestration graph.
 // This avoids the fragile whitelist approach where every new error pattern
 // would need to be explicitly enumerated.
+// 设计上采用默认软化 + 黑名单策略：
+/*注释说明了为什么这样设计：
+▎ "避免脆弱的白名单方法，即每个新错误模式都需要显式枚举"
+任何漏网的工具错误经过这个中间件时都会被转为 [Tool Error] ...的软消息，图继续运行。*/
 func isSoftRecoverableToolError(err error) bool {
 	if err == nil {
 		return false
