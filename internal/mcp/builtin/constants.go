@@ -60,6 +60,11 @@ const (
 	ToolC2Event      = "c2_event"       // 事件查询
 	ToolC2Profile    = "c2_profile"     // Malleable Profile 管理（list/get/create/update/delete）
 	ToolC2File       = "c2_file"        // 文件管理（list/get_result）
+
+	// 文档生成工具(docgen)
+	ToolDocxListTemplates = "docx_list_templates" // 列出可用企业文档模板
+	ToolDocxReadOutline   = "docx_read_outline"   // 读取模板章节/表格结构
+	ToolDocxFill          = "docx_fill"           // 原地填充模板生成 docx
 )
 
 // IsBuiltinTool 检查工具名称是否是内置工具
@@ -107,7 +112,11 @@ func IsBuiltinTool(toolName string) bool {
 		ToolC2Payload,
 		ToolC2Event,
 		ToolC2Profile,
-		ToolC2File:
+		ToolC2File,
+		// 文档生成工具
+		ToolDocxListTemplates,
+		ToolDocxReadOutline,
+		ToolDocxFill:
 		return true
 	default:
 		return false
@@ -160,5 +169,9 @@ func GetAllBuiltinTools() []string {
 		ToolC2Event,
 		ToolC2Profile,
 		ToolC2File,
+		// 文档生成工具
+		ToolDocxListTemplates,
+		ToolDocxReadOutline,
+		ToolDocxFill,
 	}
 }
