@@ -105,7 +105,7 @@ def cmd_fill(payload_path):
     filled_tables = 0
 
     # 章节填充:定位标题后按序插入正文段落与项目符号
-    for sec in payload.get("sections", []):
+    for sec in (payload.get("sections") or []):
         heading = _find_heading(doc, sec["anchor"])
         if heading is None:
             continue
@@ -117,7 +117,7 @@ def cmd_fill(payload_path):
         filled_sections += 1
 
     # 表格填充:按 index 向表格追加行
-    for t in payload.get("tables", []):
+    for t in (payload.get("tables") or []):
         idx = t.get("index", -1)
         if idx < 0 or idx >= len(doc.tables):
             continue
@@ -130,7 +130,7 @@ def cmd_fill(payload_path):
         filled_tables += 1
 
     # 封面填充(段落 + 表格单元格两种存放形式都要处理)
-    _fill_cover(doc, payload.get("cover", {}))
+    _fill_cover(doc, payload.get("cover") or {})
 
     doc.save(payload["output"])
     return {
