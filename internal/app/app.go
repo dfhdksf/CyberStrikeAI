@@ -19,6 +19,7 @@ import (
 	"cyberstrike-ai/internal/c2"
 	"cyberstrike-ai/internal/config"
 	"cyberstrike-ai/internal/database"
+	"cyberstrike-ai/internal/docgen"
 	"cyberstrike-ai/internal/einoobserve"
 	"cyberstrike-ai/internal/handler"
 	"cyberstrike-ai/internal/hitl"
@@ -133,6 +134,13 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 	registerVulnerabilityTools(mcpServer, db, log.Logger)
 	registerProjectFactTools(mcpServer, db, cfg, log.Logger)
 	registerVisionTools(mcpServer, cfg, log.Logger)
+
+	// 注册文档生成工具(docgen)
+	repoRoot, _ := os.Getwd()
+	if repoRoot == "" {
+		repoRoot = "."
+	}
+	docgen.RegisterDocgenTools(mcpServer, db, cfg, repoRoot, log.Logger)
 
 	if cfg.Auth.GeneratedPassword != "" {
 		config.PrintGeneratedPasswordWarning(cfg.Auth.GeneratedPassword, cfg.Auth.GeneratedPasswordPersisted, cfg.Auth.GeneratedPasswordPersistErr)
@@ -437,6 +445,11 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 		registerVulnerabilityTools(mcpServer, db, log.Logger)
 		registerProjectFactTools(mcpServer, db, cfg, log.Logger)
 		registerVisionTools(mcpServer, cfg, log.Logger)
+		if docgenRoot, wdErr := os.Getwd(); wdErr == nil {
+			docgen.RegisterDocgenTools(mcpServer, db, cfg, docgenRoot, log.Logger)
+		} else {
+			docgen.RegisterDocgenTools(mcpServer, db, cfg, ".", log.Logger)
+		}
 		return nil
 	}
 	configHandler.SetVulnerabilityToolRegistrar(vulnerabilityRegistrar)
