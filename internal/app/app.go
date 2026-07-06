@@ -1199,8 +1199,11 @@ func setupRoutes(
 
 		// 图编排 / 工作流定义（图结构固定，业务字段保存在 graph_json 中）
 		protected.GET("/workflows/runs/pending", workflowHandler.ListPendingRuns)
+		protected.GET("/workflows/runs/:runId/replay", workflowHandler.ReplayRun)
 		protected.GET("/workflows/runs/:runId", workflowHandler.GetRun)
 		protected.POST("/workflows/runs/:runId/resume", workflowHandler.ResumeRun)
+		protected.POST("/workflows/validate", workflowHandler.Validate)
+		protected.POST("/workflows/dry-run", workflowHandler.DryRun)
 		protected.GET("/workflows", workflowHandler.List)
 		protected.GET("/workflows/:id", workflowHandler.Get)
 		protected.POST("/workflows", workflowHandler.Create)
