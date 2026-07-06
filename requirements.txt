@@ -15,3 +15,6 @@ impacket>=0.11.0
 
 # MCP (Model Context Protocol) SDK
 mcp>=1.0.0
+
+# 文档生成（docgen）docx 原地填充
+python-docx>=1.1.0
