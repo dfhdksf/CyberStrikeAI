@@ -5569,6 +5569,227 @@ html[data-theme="dark"] .openapi-doc-btn:hover {
     margin-bottom: 16px;
 }
 
+.robot-manager {
+    margin-bottom: 24px;
+}
+
+.robot-manager-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.robot-manager-toolbar h4 {
+    margin: 0 0 4px;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.robot-manager-toolbar p {
+    margin: 0;
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    line-height: 1.45;
+}
+
+.robot-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
+}
+
+.robot-card {
+    display: flex;
+    align-items: stretch;
+    justify-content: space-between;
+    gap: 14px;
+    width: 100%;
+    min-height: 104px;
+    padding: 16px;
+    text-align: left;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+
+.robot-card:hover,
+.robot-card.is-active {
+    border-color: var(--accent-color);
+    background: var(--bg-primary);
+}
+
+.robot-card:hover {
+    transform: translateY(-1px);
+}
+
+.robot-card-main,
+.robot-card-meta {
+    display: flex;
+    flex-direction: column;
+}
+
+.robot-card-main {
+    min-width: 0;
+    gap: 8px;
+}
+
+.robot-card-meta {
+    flex-shrink: 0;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.robot-card-title {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.robot-card-desc {
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    color: var(--text-secondary);
+}
+
+.robot-card-action {
+    font-size: 0.8125rem;
+    color: var(--accent-color);
+    font-weight: 500;
+}
+
+.robot-status-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 58px;
+    padding: 4px 9px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border: 1px solid var(--border-color);
+    white-space: nowrap;
+}
+
+.robot-status-pill--idle {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+}
+
+.robot-status-pill--ready {
+    color: var(--accent-color);
+    background: rgba(0, 102, 255, 0.1);
+    border-color: rgba(0, 102, 255, 0.25);
+}
+
+.robot-status-pill--enabled {
+    color: var(--success-color);
+    background: rgba(40, 167, 69, 0.12);
+    border-color: rgba(40, 167, 69, 0.35);
+}
+
+.robot-editor-empty {
+    margin: 8px 0 24px;
+    padding: 28px;
+    border: 1px dashed var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    text-align: center;
+}
+
+.robot-editor-empty h4 {
+    margin: 0 0 8px;
+    font-size: 1rem;
+    color: var(--text-primary);
+}
+
+.robot-editor-empty p {
+    margin: 0;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.robot-editor-panel {
+    margin-top: 8px;
+    padding: 20px 22px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+}
+
+.robot-editor-panel[hidden],
+.robot-editor-empty[hidden] {
+    display: none !important;
+}
+
+.robot-create-modal-content {
+    max-width: 680px;
+}
+
+.robot-type-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.robot-type-option {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 92px;
+    padding: 16px;
+    text-align: left;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+
+.robot-type-option:hover {
+    border-color: var(--accent-color);
+    background: var(--bg-primary);
+    transform: translateY(-1px);
+}
+
+.robot-type-option span {
+    font-size: 0.9375rem;
+    font-weight: 600;
+}
+
+.robot-type-option small {
+    color: var(--text-secondary);
+    line-height: 1.45;
+}
+
+@media (max-width: 768px) {
+    .robot-manager-toolbar {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .robot-manager-toolbar .btn-primary {
+        width: 100%;
+    }
+
+    .robot-card {
+        flex-direction: column;
+    }
+
+    .robot-card-meta {
+        flex-direction: row;
+        align-items: center;
+    }
+}
+
 .settings-subsection-header {
     margin-top: 24px;
     margin-bottom: 16px;

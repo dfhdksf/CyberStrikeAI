@@ -585,6 +585,7 @@
     "knowledgeRetrievalTag": "知识检索",
     "error": "错误",
     "streamNetworkErrorHint": "连接已中断（{{detail}}）。长时间任务可能仍在后端执行，请查看顶部「运行中」任务或稍后刷新本对话。",
+    "streamEndedWithoutDone": "连接提前结束，未收到任务完成信号。任务可能仍在后端执行，请查看顶部「运行中」任务或刷新当前对话。",
     "taskCancelled": "任务已取消",
     "userInterruptContinueTitle": "⏸️ 用户中断并继续",
     "unknownTool": "未知工具",
@@ -1231,6 +1232,17 @@
     "robots": {
       "title": "机器人设置",
       "description": "配置微信、企业微信、钉钉、飞书等机器人，在手机端直接与 CyberStrikeAI 对话，无需在服务器上打开网页。",
+      "managerTitle": "机器人管理",
+      "managerDesc": "先选择机器人类型，再进入对应配置；已配置的平台会显示连接状态。",
+      "newBot": "新建机器人",
+      "configure": "配置",
+      "statusNotConfigured": "未配置",
+      "statusConfigured": "已配置",
+      "statusEnabled": "已启用",
+      "emptyTitle": "选择一个机器人开始配置",
+      "emptyDesc": "从上方列表点击已有平台，或点击“新建机器人”按类型创建。",
+      "createTitle": "新建机器人",
+      "createDesc": "选择机器人类型后进入专属配置。当前版本每个平台支持一个内置机器人配置。",
       "wechat": {
         "title": "微信 / iLink",
         "subtitle": "扫码绑定个人微信，在手机端直接与 CyberStrikeAI 对话",
@@ -1259,6 +1271,7 @@
       },
       "wecom": {
         "title": "企业微信",
+        "subtitle": "HTTP 回调模式，适合企业内部应用机器人",
         "enabled": "启用企业微信机器人",
         "token": "Token",
         "tokenPlaceholder": "Token",
@@ -1273,6 +1286,7 @@
       },
       "dingtalk": {
         "title": "钉钉",
+        "subtitle": "企业内部应用机器人，使用 Stream 长连接",
         "enabled": "启用钉钉机器人",
         "clientIdLabel": "Client ID (AppKey)",
         "clientIdPlaceholder": "钉钉应用 AppKey",
@@ -1282,6 +1296,7 @@
       },
       "lark": {
         "title": "飞书 (Lark)",
+        "subtitle": "飞书企业应用机器人，支持单聊与群聊 @",
         "enabled": "启用飞书机器人",
         "appIdLabel": "App ID",
         "appIdPlaceholder": "飞书应用 App ID",
@@ -1289,6 +1304,40 @@
         "appSecretPlaceholder": "飞书应用 App Secret",
         "verifyTokenLabel": "Verify Token（可选）",
         "verifyTokenPlaceholder": "事件订阅 Verification Token"
+      },
+      "telegram": {
+        "title": "Telegram",
+        "subtitle": "Bot API 长轮询，私聊与群聊 @",
+        "enabled": "启用 Telegram 机器人",
+        "botToken": "Bot Token",
+        "botTokenHint": "通过 getUpdates 长轮询收消息，无需公网回调",
+        "botUsername": "Bot Username（可选）",
+        "allowGroup": "允许群聊（仅响应 @ 机器人）"
+      },
+      "slack": {
+        "title": "Slack",
+        "subtitle": "Socket Mode，无需公网回调",
+        "enabled": "启用 Slack 机器人",
+        "botToken": "Bot Token (xoxb-)",
+        "appToken": "App-Level Token (xapp-)",
+        "appTokenHint": "需 connections:write 权限，用于 Socket Mode"
+      },
+      "discord": {
+        "title": "Discord",
+        "subtitle": "Gateway WebSocket，私聊与服务器 @",
+        "enabled": "启用 Discord 机器人",
+        "botToken": "Bot Token",
+        "botTokenHint": "开发者门户创建 Bot，开启 Message Content Intent",
+        "allowGuild": "允许服务器频道（仅响应 @ 机器人）"
+      },
+      "qq": {
+        "title": "QQ 机器人",
+        "subtitle": "QQ 开放平台 WebSocket，C2C 与群 @",
+        "enabled": "启用 QQ 机器人",
+        "appId": "App ID",
+        "clientSecret": "Client Secret",
+        "secretHint": "从 QQ 机器人开放平台获取；上线前可勾选沙箱",
+        "sandbox": "沙箱环境"
       }
     },
     "apply": {
@@ -2939,6 +2988,7 @@
     "connecting": "连线中",
     "deleteSelected": "删除选中",
     "autoLayout": "自动布局",
+    "dryRun": "试运行",
     "canvasEmpty": "从左侧拖拽节点到画布，或点击节点按钮快速添加",
     "properties": "属性",
     "nodeProperties": "节点属性",
@@ -2983,10 +3033,18 @@
       "outputKey": "输出变量名",
       "conditionExpression": "条件表达式",
       "conditionHint": "节点会计算 matched（true/false），由出边决定分支：第一条线为「是」，第二条为「否」；也可在连线上写 <code>{{previous.matched}} == \"true\"</code>。",
+      "conditionGuideTitle": "可用语法",
+      "conditionGuideVars": "变量：{{previous.output}}、{{previous.matched}}、{{inputs.message}}、{{outputs.变量名}}、{{节点ID.output}}",
+      "conditionGuideOps": "操作符：==、!=、>、>=、<、<=、contains、matches、&&、||",
+      "conditionGuideJson": "嵌套字段：jsonpath(value, \"$.status\") 或 jq(value, \".severity\")",
       "edgeCondition": "连线条件",
+      "edgeBranch": "条件分支",
+      "selectBranch": "请选择",
       "edgeConditionHintCondition": "{{previous.matched}} == \"true\"（是）或 == \"false\"（否）",
       "edgeConditionHintExample": "例如: {{previous.output}} == \"ok\"",
       "edgeBranchHint": "从条件节点连出的第一条线默认为「是」分支，第二条为「否」分支；也可在此自定义条件。",
+      "joinStrategy": "汇聚策略",
+      "joinStrategyHint": "当多个上游同时进入该节点时，决定如何生成 previous：合并全部、按画布顺序取最后、取第一个非空或上游失败即中止。",
       "hitlPrompt": "审批提示",
       "hitlPromptPlaceholder": "请审批是否继续",
       "hitlReviewer": "审批方",
@@ -3005,6 +3063,11 @@
     "nodeFallback": "节点 {{n}}",
     "loadFailed": "加载工作流失败",
     "saveFailed": "保存工作流失败",
+    "dryRunPrompt": "输入试运行消息",
+    "dryRunFailed": "试运行失败",
+    "dryRunDone": "试运行完成",
+    "dryRunTrace": "试运行轨迹",
+    "dryRunNoTrace": "暂无轨迹",
     "deleteFailed": "删除工作流失败",
     "saved": "工作流已保存",
     "deleted": "工作流已删除",
@@ -3026,6 +3089,13 @@
       "conditionNeedsExpr": "条件节点 {{label}} 需要条件表达式",
       "conditionNeedsOutEdge": "条件节点 {{label}} 至少需要一条出边（是/否分支）",
       "conditionTooManyEdges": "条件节点 {{label}} 建议最多两条出边（是/否）；第三条及以后需配置连线条件",
+      "conditionBranchLabel": "条件节点 {{label}} 的出边必须标记为是/否",
+      "conditionBranchDuplicate": "条件节点 {{label}} 存在重复分支",
+      "nodeNeedsIncoming": "节点 {{label}} 需要入边",
+      "nodeNeedsOutgoing": "节点 {{label}} 需要出边",
+      "nodeUnreachable": "节点 {{label}} 无法从开始节点到达",
+      "graphCycle": "工作流存在环路，请保持 DAG",
+      "serverFailed": "后端图校验失败",
       "outputNeedsKey": "输出节点 {{label}} 需要输出变量名"
     }
   },
