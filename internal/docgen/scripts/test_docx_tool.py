@@ -53,5 +53,85 @@ class TestList(unittest.TestCase):
         self.assertTrue(all(p.endswith(".docx") for p in paths))
 
 
+class TestFill(unittest.TestCase):
+    def _fill_payload(self, out_path):
+        return {
+            "template": TECH_TEMPLATE,
+            "output": out_path,
+            "sections": [
+                {
+                    "anchor": "技术预研目标",
+                    "paragraphs": ["验证 docx 原地填充可行性。"],
+                    "bullets": ["目标一", "目标二"],
+                }
+            ],
+            "tables": [],
+            "cover": {"当前版本": "V1.0"},
+        }
+
+    def test_fill_creates_output_and_inserts_content(self):
+        import tempfile
+        from docx import Document
+
+        with tempfile.TemporaryDirectory() as td:
+            out = os.path.join(td, "out.docx")
+            payload = os.path.join(td, "p.json")
+            with open(payload, "w", encoding="utf-8") as f:
+                json.dump(self._fill_payload(out), f, ensure_ascii=False)
+            proc = run("fill", "--payload", payload)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            res = json.loads(proc.stdout)
+            self.assertTrue(os.path.exists(res["output_path"]))
+            # 内容被插入
+            doc = Document(out)
+            body = "\n".join(p.text for p in doc.paragraphs)
+            self.assertIn("验证 docx 原地填充可行性", body)
+            self.assertIn("目标一", body)
+
+    def test_fill_preserves_headers_and_tables(self):
+        import tempfile
+        from docx import Document
+
+        original = Document(TECH_TEMPLATE)
+        orig_table_count = len(original.tables)
+        orig_section_count = len(original.sections)
+
+        with tempfile.TemporaryDirectory() as td:
+            out = os.path.join(td, "out.docx")
+            payload = os.path.join(td, "p.json")
+            with open(payload, "w", encoding="utf-8") as f:
+                json.dump(self._fill_payload(out), f, ensure_ascii=False)
+            run("fill", "--payload", payload)
+            doc = Document(out)
+            # 表格数量不变(封面/版本表/进度表等全部保留)
+            self.assertEqual(len(doc.tables), orig_table_count)
+            # 分节数量不变(封面/目录/正文分节保留 → 页眉页脚随之保留)
+            self.assertEqual(len(doc.sections), orig_section_count)
+
+    def test_fill_cover_field_in_table_gets_written(self):
+        """封面字段位于 table[0] 单元格中,填充后单元格文本应包含值。"""
+        import tempfile
+        from docx import Document
+
+        with tempfile.TemporaryDirectory() as td:
+            out = os.path.join(td, "out.docx")
+            payload_data = self._fill_payload(out)
+            # 只保留 cover 字段测试,清空 sections 干扰
+            payload_data["cover"] = {"当前版本": "V1.0"}
+            payload = os.path.join(td, "p.json")
+            with open(payload, "w", encoding="utf-8") as f:
+                json.dump(payload_data, f, ensure_ascii=False)
+            proc = run("fill", "--payload", payload)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            doc = Document(out)
+            # 值必须真的落到表格 0 里,证明我们处理了 cell 中的封面字段
+            table_text = "\n".join(
+                cell.text
+                for row in doc.tables[0].rows
+                for cell in row.cells
+            )
+            self.assertIn("V1.0", table_text)
+
+
 if __name__ == "__main__":
     unittest.main()
