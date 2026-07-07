@@ -246,7 +246,7 @@ type GetConfigResponse struct {
 	Knowledge  config.KnowledgeConfig  `json:"knowledge"`
 	Robots     config.RobotsConfig     `json:"robots,omitempty"`
 	MultiAgent config.MultiAgentPublic `json:"multi_agent,omitempty"`
-	C2         config.C2Public          `json:"c2"`
+	C2         config.C2Public         `json:"c2"`
 }
 
 // ToolConfigInfo 工具配置信息
@@ -320,7 +320,7 @@ func (h *ConfigHandler) GetConfig(c *gin.Context) {
 	}
 	multiPub := config.MultiAgentPublic{
 		Enabled:                      h.config.MultiAgent.Enabled,
-		RobotDefaultAgentMode: config.NormalizeRobotAgentMode(h.config.MultiAgent),
+		RobotDefaultAgentMode:        config.NormalizeRobotAgentMode(h.config.MultiAgent),
 		BatchUseMultiAgent:           h.config.MultiAgent.BatchUseMultiAgent,
 		SubAgentCount:                subAgentCount,
 		Orchestration:                config.NormalizeMultiAgentOrchestration(h.config.MultiAgent.Orchestration),
@@ -673,16 +673,17 @@ func (h *ConfigHandler) GetTools(c *gin.Context) {
 
 // UpdateConfigRequest 更新配置请求
 type UpdateConfigRequest struct {
-	OpenAI     *config.OpenAIConfig         `json:"openai,omitempty"`
-	Vision     *config.VisionConfig         `json:"vision,omitempty"`
-	FOFA       *config.FofaConfig           `json:"fofa,omitempty"`
-	MCP        *config.MCPConfig            `json:"mcp,omitempty"`
-	Tools      []ToolEnableStatus           `json:"tools,omitempty"`
-	Agent      *AgentConfigUpdate           `json:"agent,omitempty"`
-	Knowledge  *config.KnowledgeConfig      `json:"knowledge,omitempty"`
-	Robots     *config.RobotsConfig         `json:"robots,omitempty"`
-	MultiAgent *config.MultiAgentAPIUpdate  `json:"multi_agent,omitempty"`
-	C2         *config.C2APIUpdate           `json:"c2,omitempty"`
+	OpenAI     *config.OpenAIConfig        `json:"openai,omitempty"`
+	Vision     *config.VisionConfig        `json:"vision,omitempty"`
+	FOFA       *config.FofaConfig          `json:"fofa,omitempty"`
+	MCP        *config.MCPConfig           `json:"mcp,omitempty"`
+	Tools      []ToolEnableStatus          `json:"tools,omitempty"`
+	Agent      *AgentConfigUpdate          `json:"agent,omitempty"`
+	Hitl       *config.HitlConfig          `json:"hitl,omitempty"`
+	Knowledge  *config.KnowledgeConfig     `json:"knowledge,omitempty"`
+	Robots     *config.RobotsConfig        `json:"robots,omitempty"`
+	MultiAgent *config.MultiAgentAPIUpdate `json:"multi_agent,omitempty"`
+	C2         *config.C2APIUpdate         `json:"c2,omitempty"`
 }
 
 // AgentConfigUpdate 用于 PATCH /api/config 的 agent 段：仅 JSON 中出现的字段（指针非 nil）覆盖内存配置。
@@ -773,6 +774,25 @@ func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 		if h.mcpServer != nil {
 			h.mcpServer.ConfigureHTTPToolCallTimeoutFromAgentMinutes(h.config.Agent.ToolTimeoutMinutes)
 		}
+	}
+
+	if req.Hitl != nil {
+		h.config.Hitl.AuditModel = req.Hitl.AuditModel
+		h.config.Hitl.ToolWhitelist = mergeHitlToolWhitelistSlice(nil, req.Hitl.ToolWhitelist)
+		h.config.Hitl.DefaultReviewer = req.Hitl.EffectiveDefaultReviewer()
+		h.config.Hitl.AuditAgentPrompt = strings.TrimSpace(req.Hitl.AuditAgentPrompt)
+		h.config.Hitl.AuditAgentPromptReviewEdit = strings.TrimSpace(req.Hitl.AuditAgentPromptReviewEdit)
+		if req.Hitl.RetentionDays != nil {
+			v := *req.Hitl.RetentionDays
+			if v < 0 {
+				v = 0
+			}
+			h.config.Hitl.RetentionDays = &v
+		}
+		h.logger.Info("更新HITL配置",
+			zap.String("default_reviewer", h.config.Hitl.DefaultReviewer),
+			zap.Int("tool_whitelist", len(h.config.Hitl.ToolWhitelist)),
+		)
 	}
 
 	// 更新Knowledge配置
@@ -1471,7 +1491,7 @@ func (h *ConfigHandler) ApplyConfig(c *gin.Context) {
 			Result:   "success",
 			Message:  "配置已应用",
 			Detail: map[string]interface{}{
-				"tools_count":      len(h.config.Security.Tools),
+				"tools_count":       len(h.config.Security.Tools),
 				"knowledge_enabled": h.config.Knowledge.Enabled,
 				"c2_enabled":        h.config.C2.EnabledEffective(),
 			},
@@ -1804,9 +1824,15 @@ func (h *ConfigHandler) MergeHitlToolWhitelistIntoConfig(add []string) error {
 func updateHitlConfig(doc *yaml.Node, cfg config.HitlConfig) {
 	root := doc.Content[0]
 	hitlNode := ensureMap(root, "hitl")
+	auditModelNode := ensureMap(hitlNode, "audit_model")
+	setStringInMap(auditModelNode, "provider", cfg.AuditModel.Provider)
+	setStringInMap(auditModelNode, "base_url", cfg.AuditModel.BaseURL)
+	setStringInMap(auditModelNode, "api_key", cfg.AuditModel.APIKey)
+	setStringInMap(auditModelNode, "model", cfg.AuditModel.Model)
 	// flow 样式 [a, b, c] 单行展示，工具多时比块序列省行数
 	setFlowStringSliceInMap(hitlNode, "tool_whitelist", cfg.ToolWhitelist)
 	setStringInMap(hitlNode, "default_reviewer", cfg.EffectiveDefaultReviewer())
+	setIntInMap(hitlNode, "retention_days", cfg.RetentionDaysEffective())
 	setStringInMap(hitlNode, "audit_agent_prompt", cfg.AuditAgentPrompt)
 	setStringInMap(hitlNode, "audit_agent_prompt_review_edit", cfg.AuditAgentPromptReviewEdit)
 }
