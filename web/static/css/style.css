@@ -22686,14 +22686,15 @@ html[data-theme="dark"] .vulnerability-card:hover {
     max-width: min(380px, calc(100vw - 40px));
     padding: 9px 11px;
     border-radius: 8px;
-    background: rgba(17, 24, 39, 0.96);
-    color: #ffffff;
+    background: #ffffff;
+    color: var(--text-primary);
+    border: 1px solid rgba(0, 0, 0, 0.08);
     font-size: 0.75rem;
     line-height: 1.45;
     text-align: left;
     white-space: normal;
     overflow-wrap: anywhere;
-    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
     opacity: 0;
     visibility: hidden;
     transform: translate(4px, -50%);
@@ -22709,7 +22710,9 @@ html[data-theme="dark"] .vulnerability-card:hover {
     z-index: 21;
     width: 10px;
     height: 10px;
-    background: rgba(17, 24, 39, 0.96);
+    background: #ffffff;
+    border-left: 1px solid rgba(0, 0, 0, 0.08);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
     opacity: 0;
     visibility: hidden;
     transform: translate(4px, -50%) rotate(45deg);
@@ -22948,14 +22951,15 @@ html[data-theme="dark"] .vulnerability-card:hover {
     max-width: min(380px, calc(100vw - 40px));
     padding: 9px 11px;
     border-radius: 8px;
-    background: rgba(17, 24, 39, 0.96);
-    color: #ffffff;
+    background: #ffffff;
+    color: var(--text-primary);
+    border: 1px solid rgba(0, 0, 0, 0.08);
     font-size: 0.75rem;
     line-height: 1.45;
     text-align: left;
     white-space: normal;
     overflow-wrap: anywhere;
-    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
@@ -22976,7 +22980,9 @@ html[data-theme="dark"] .vulnerability-card:hover {
     top: 50%;
     width: 10px;
     height: 10px;
-    background: rgba(17, 24, 39, 0.96);
+    background: #ffffff;
+    border-left: 1px solid rgba(0, 0, 0, 0.08);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
     transform: translateY(-50%) rotate(45deg);
 }
 
@@ -22991,6 +22997,10 @@ html[data-theme="dark"] .vulnerability-card:hover {
 .selection-detail-tooltip.placement-left::before {
     left: auto;
     right: -5px;
+    border-left: none;
+    border-bottom: none;
+    border-right: 1px solid rgba(0, 0, 0, 0.08);
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 .role-selection-checkmark-main {
@@ -29086,6 +29096,30 @@ html[data-theme="dark"] .agent-mode-option .role-selection-item-name-main {
 html[data-theme="dark"] .role-selection-item-description-main,
 html[data-theme="dark"] .agent-mode-option .role-selection-item-description-main {
     color: var(--text-secondary) !important;
+}
+
+html[data-theme="dark"] .selection-detail-tooltip {
+    background: rgba(17, 24, 39, 0.96);
+    color: #ffffff;
+    border-color: rgba(148, 163, 184, 0.16);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+html[data-theme="dark"] .selection-detail-tooltip::before {
+    background: rgba(17, 24, 39, 0.96);
+    border-color: transparent;
+}
+
+html[data-theme="dark"] .agent-mode-option::after {
+    background: rgba(17, 24, 39, 0.96);
+    color: #ffffff;
+    border-color: rgba(148, 163, 184, 0.16);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+html[data-theme="dark"] .agent-mode-option::before {
+    background: rgba(17, 24, 39, 0.96);
+    border-color: transparent;
 }
 
 html[data-theme="dark"] .agent-mode-panel,
