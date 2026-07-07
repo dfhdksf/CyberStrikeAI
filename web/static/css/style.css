@@ -30982,7 +30982,7 @@ html[data-theme="dark"] #hitl-log-modal .hitl-context-block--execution .hitl-con
     color: var(--text-primary) !important;
 }
 
-/* Knowledge / Skill / Agent / Role modal dark theme */
+/* Knowledge / Skill / Agent modal dark theme — panel surfaces */
 html[data-theme="dark"] #knowledge-item-modal .modal-content,
 html[data-theme="dark"] #knowledge-item-modal .modal-header,
 html[data-theme="dark"] #knowledge-item-modal .modal-body,
@@ -30998,7 +30998,12 @@ html[data-theme="dark"] #skill-view-modal .modal-footer,
 html[data-theme="dark"] #agent-md-modal .modal-content,
 html[data-theme="dark"] #agent-md-modal .modal-header,
 html[data-theme="dark"] #agent-md-modal .modal-body,
-html[data-theme="dark"] #agent-md-modal .modal-footer,
+html[data-theme="dark"] #agent-md-modal .modal-footer {
+    background: #111827 !important;
+    color: var(--text-primary) !important;
+    border-color: #263244 !important;
+}
+
 .role-form-native-select {
     position: absolute;
     width: 1px;
