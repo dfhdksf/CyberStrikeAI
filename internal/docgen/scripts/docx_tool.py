@@ -9,16 +9,61 @@ import sys
 
 from docx import Document
 
-# 一级正文章节样式(style_id;真实模板中 name 为 "标题 1（GYKJ）")
-HEADING_STYLE_ID = "1GYKJ"
 # 封面字段样式(style_id;真实模板中 name 为 "封面副标题（GYKJ）")
 COVER_STYLE_ID = "GYKJf1"
 # 章节提示语常用前缀
 HINT_PREFIXES = ("编写说明", "提示")
 
 
+def _open_document(path):
+    """打开 docx 或 dotx 文件,兼容模板格式。"""
+    try:
+        return Document(path)
+    except ValueError as e:
+        if "template" not in str(e):
+            raise
+    import shutil
+    import tempfile
+    import zipfile
+    tmp = tempfile.NamedTemporaryFile(suffix=".docx", delete=False)
+    tmp_path = tmp.name
+    tmp.close()
+    shutil.copy2(path, tmp_path)
+    with zipfile.ZipFile(tmp_path, "r") as zin:
+        ct = zin.read("[Content_Types].xml").decode("utf-8")
+    ct_fixed = ct.replace(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
+    )
+    out_path = tmp_path + ".fixed.docx"
+    with zipfile.ZipFile(tmp_path, "r") as zin:
+        with zipfile.ZipFile(out_path, "w") as zout:
+            for item in zin.infolist():
+                data = zin.read(item.filename)
+                if item.filename == "[Content_Types].xml":
+                    data = ct_fixed.encode("utf-8")
+                zout.writestr(item, data)
+    os.unlink(tmp_path)
+    doc = Document(out_path)
+    os.unlink(out_path)
+    return doc
+
+
 def _para_text(p):
     return (p.text or "").strip()
+
+
+def _is_heading1(style):
+    """判断是否为一级标题样式(兼容不同模板的 style_id)。"""
+    if style is None:
+        return False
+    sid = getattr(style, "style_id", "") or ""
+    name = getattr(style, "name", "") or ""
+    if sid == "1GYKJ" or sid == "188":
+        return True
+    if "标题 1" in name or "Heading 1" in name.lower():
+        return True
+    return False
 
 
 def _style_matches(style, target_id):
@@ -28,7 +73,7 @@ def _style_matches(style, target_id):
 
 
 def cmd_outline(template):
-    doc = Document(template)
+    doc = _open_document(template)
     headings = []
     tables_meta = []
     cover_fields = []
@@ -38,18 +83,18 @@ def cmd_outline(template):
         text = _para_text(p)
         if not text:
             continue
-        if _style_matches(p.style, HEADING_STYLE_ID):
-            # 收集该标题之后、下一个标题之前的首个提示语作为 hint
+        if _is_heading1(p.style):
             hint = ""
             for nxt in paras[idx + 1:]:
-                if _style_matches(nxt.style, HEADING_STYLE_ID):
+                if _is_heading1(nxt.style):
                     break
                 ntext = _para_text(nxt)
                 if ntext.startswith(HINT_PREFIXES):
                     hint = ntext
                     break
+            style_id = getattr(p.style, "style_id", "") or ""
             headings.append(
-                {"anchor": text, "style": HEADING_STYLE_ID, "text": text, "hint": hint}
+                {"anchor": text, "style": style_id, "text": text, "hint": hint}
             )
         elif _style_matches(p.style, COVER_STYLE_ID) and text.endswith("："):
             cover_fields.append(text.rstrip("："))
@@ -68,7 +113,7 @@ def cmd_list(root):
     templates = []
     for dirpath, _dirs, files in os.walk(root):
         for f in files:
-            if f.endswith(".docx") and not f.startswith("~$"):
+            if (f.endswith(".docx") or f.endswith(".dotx")) and not f.startswith("~$"):
                 full = os.path.join(dirpath, f)
                 rel = os.path.relpath(full, root)
                 templates.append({"path": rel, "name": os.path.splitext(f)[0]})
