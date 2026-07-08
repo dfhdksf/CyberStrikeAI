@@ -495,8 +495,8 @@ async function updateIndexProgress() {
                     <div style="color: #999; font-size: 12px; margin-bottom: 12px;">
                         可能的原因：嵌入模型配置错误、API密钥无效、余额不足等。请检查配置后重试。
                     </div>
-                    <div style="display: flex; gap: 8px;">
-                        <button onclick="rebuildKnowledgeIndex()" style="
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <button onclick="buildKnowledgeIndex()" style="
                             background: #007bff;
                             color: white;
                             border: none;
@@ -505,6 +505,15 @@ async function updateIndexProgress() {
                             cursor: pointer;
                             font-size: 13px;
                         ">重试</button>
+                        <button onclick="rebuildKnowledgeIndexFull()" style="
+                            background: #6c757d;
+                            color: white;
+                            border: none;
+                            padding: 6px 12px;
+                            border-radius: 4px;
+                            cursor: pointer;
+                            font-size: 13px;
+                        ">全量重建</button>
                         <button onclick="stopIndexProgressPolling()" style="
                             background: #6c757d;
                             color: white;
@@ -547,7 +556,7 @@ async function updateIndexProgress() {
                 <div class="knowledge-index-progress">
                     <div class="progress-header">
                         <span class="progress-icon">🔨</span>
-                        <span class="progress-text">正在重建索引：${rebuildCurrent}/${rebuildTotal} (${rebuildProgress.toFixed(1)}%) - 失败：${rebuildFailed}</span>
+                        <span class="progress-text">正在构建索引：${rebuildCurrent}/${rebuildTotal} (${rebuildProgress.toFixed(1)}%) - 失败：${rebuildFailed}</span>
                     </div>
                     <div class="progress-bar-container">
                         <div class="progress-bar" style="width: ${rebuildProgress}%"></div>
@@ -579,6 +588,7 @@ async function updateIndexProgress() {
                 indexProgressInterval = null;
             }
         } else {
+            const showResume = indexedItems < totalItems;
             progressContainer.innerHTML = `
                 <div class="knowledge-index-progress">
                     <div class="progress-header">
@@ -588,7 +598,10 @@ async function updateIndexProgress() {
                     <div class="progress-bar-container">
                         <div class="progress-bar" style="width: ${progressPercent}%"></div>
                     </div>
-                    <div class="progress-hint">索引构建完成后，语义搜索功能将可用</div>
+                    <div class="progress-hint">
+                        索引构建完成后，语义搜索功能将可用
+                        ${showResume ? '<br><button type="button" onclick="buildKnowledgeIndex()" style="margin-top:8px;background:#007bff;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;">构建索引</button>' : ''}
+                    </div>
                 </div>
             `;
             
@@ -842,59 +855,87 @@ async function refreshKnowledgeBase() {
     }
 }
 
-// 重建索引
-async function rebuildKnowledgeIndex() {
-    try {
-        if (!confirm('确定要重建索引吗？这可能需要一些时间。')) {
-            return;
-        }
-        showNotification('正在重建索引...', 'info');
-        
-        // 先停止现有的轮询
-        if (indexProgressInterval) {
-            clearInterval(indexProgressInterval);
-            indexProgressInterval = null;
-        }
-        
-        // 立即显示"正在重建"状态，因为重建开始时会清空旧索引
-        const progressContainer = document.getElementById('knowledge-index-progress');
-        if (progressContainer) {
-            progressContainer.style.display = 'block';
-            progressContainer.innerHTML = `
-                <div class="knowledge-index-progress">
-                    <div class="progress-header">
-                        <span class="progress-icon">🔨</span>
-                        <span class="progress-text">正在重建索引: 准备中...</span>
-                    </div>
-                    <div class="progress-bar-container">
-                        <div class="progress-bar" style="width: 0%"></div>
-                    </div>
-                    <div class="progress-hint">索引构建完成后，语义搜索功能将可用</div>
+// 启动知识库索引任务（mode: missing | full）
+async function startKnowledgeIndexJob(mode = 'missing') {
+    const fullRebuild = mode === 'full';
+    const confirmMessage = fullRebuild
+        ? '将重新索引全部知识项，这可能需要较长时间，是否继续？'
+        : '将为尚未生成向量的知识项构建索引，是否继续？';
+    if (!confirm(confirmMessage)) {
+        return;
+    }
+
+    const actionLabel = fullRebuild ? '全量重建索引' : '构建索引';
+    showNotification(`正在启动${actionLabel}...`, 'info');
+
+    if (indexProgressInterval) {
+        clearInterval(indexProgressInterval);
+        indexProgressInterval = null;
+    }
+
+    const progressContainer = document.getElementById('knowledge-index-progress');
+    if (progressContainer) {
+        progressContainer.style.display = 'block';
+        progressContainer.innerHTML = `
+            <div class="knowledge-index-progress">
+                <div class="progress-header">
+                    <span class="progress-icon">🔨</span>
+                    <span class="progress-text">正在${actionLabel}: 准备中...</span>
                 </div>
-            `;
-        }
-        
-        const response = await apiFetch('/api/knowledge/index', {
-            method: 'POST'
-        });
-        if (!response.ok) {
-            throw new Error('重建索引失败');
-        }
-        showNotification('索引重建已开始，将在后台进行', 'success');
-        
-        // 等待一小段时间，确保后端已经开始处理并清空了旧索引
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // 立即更新一次进度
+                <div class="progress-bar-container">
+                    <div class="progress-bar" style="width: 0%"></div>
+                </div>
+                <div class="progress-hint">索引构建完成后，语义搜索功能将可用</div>
+            </div>
+        `;
+    }
+
+    const query = fullRebuild ? '?mode=full' : '';
+    const response = await apiFetch(`/api/knowledge/index${query}`, {
+        method: 'POST'
+    });
+
+    let payload = {};
+    try {
+        payload = await response.json();
+    } catch (_) {
+        payload = {};
+    }
+
+    if (response.status === 409) {
+        showNotification(payload.error || '已有索引任务正在进行，请等待完成', 'warning');
         updateIndexProgress();
-        
-        // 开始轮询进度（每2秒刷新一次，比默认的3秒更频繁）
-        if (!indexProgressInterval) {
-            indexProgressInterval = setInterval(updateIndexProgress, 2000);
-        }
+        return;
+    }
+    if (!response.ok) {
+        throw new Error(payload.error || `${actionLabel}失败`);
+    }
+
+    showNotification(payload.message || `${actionLabel}已开始，将在后台进行`, 'success');
+    await new Promise(resolve => setTimeout(resolve, 500));
+    updateIndexProgress();
+    if (!indexProgressInterval) {
+        indexProgressInterval = setInterval(updateIndexProgress, 2000);
+    }
+}
+
+// 构建索引（默认：仅处理尚无向量的知识项）
+async function buildKnowledgeIndex() {
+    try {
+        await startKnowledgeIndexJob('missing');
     } catch (error) {
-        console.error('重建索引失败:', error);
-        showNotification('重建索引失败: ' + error.message, 'error');
+        console.error('构建索引失败:', error);
+        showNotification('构建索引失败: ' + error.message, 'error');
+    }
+}
+
+// 全量重建索引（显式 opt-in）
+async function rebuildKnowledgeIndexFull() {
+    try {
+        await startKnowledgeIndexJob('full');
+    } catch (error) {
+        console.error('全量重建索引失败:', error);
+        showNotification('全量重建索引失败: ' + error.message, 'error');
     }
 }
 

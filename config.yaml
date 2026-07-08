@@ -10,7 +10,7 @@
 # ============================================
 
 # 前端显示的版本号（可选，不填则显示默认版本）
-version: "v1.6.50"
+version: "v1.6.51"
 # 服务器配置
 server:
   host: 0.0.0.0 # 监听地址，0.0.0.0 表示监听所有网络接口
@@ -108,6 +108,12 @@ agent:
 hitl:
   # 全局默认审批方：human=人工审批，audit_agent=审计 Agent；未选会话时切换会写入本项，重启后仍生效
   default_reviewer: human
+  # 审计 Agent 专用模型；字段留空则复用上方 openai 配置。建议 model 填小模型，用于降低审批成本。
+  audit_model:
+    provider: "" # openai / claude；留空跟随 openai.provider
+    base_url: "" # 留空跟随 openai.base_url
+    api_key: "" # 留空跟随 openai.api_key
+    model: "" # 留空跟随 openai.model，例如可填 gpt-4o-mini / qwen-turbo / deepseek-chat
   # 已决策审计日志保留天数（与 MCP 监控一致；省略默认 90；0 表示不自动清理）
   retention_days: 90
   # 按你环境里的真实工具名增删（与侧栏一致、小写不敏感）；不需要全局免审批可改为 []

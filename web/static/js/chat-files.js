@@ -17,6 +17,156 @@ let chatFilesPendingUploadDir = '';
 /** 文件管理页面向服务器上传进行中，避免重复选择并禁用顶栏按钮 */
 let chatFilesXHRUploadBusy = false;
 
+const CHAT_FILES_FILTER_SELECT_IDS = ['chat-files-group-by'];
+const chatFilesFilterSelectMap = {};
+let chatFilesFilterSelectDocBound = false;
+const CHAT_FILES_FILTER_SELECT_CARET = '<svg class="chat-files-filter-select-caret" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+function closeAllChatFilesFilterSelects() {
+    Object.keys(chatFilesFilterSelectMap).forEach(function (id) {
+        const reg = chatFilesFilterSelectMap[id];
+        if (!reg || !reg.wrapper) return;
+        reg.wrapper.classList.remove('open');
+        if (reg.trigger) reg.trigger.setAttribute('aria-expanded', 'false');
+    });
+}
+
+function syncChatFilesFilterSelect(selectId) {
+    const reg = chatFilesFilterSelectMap[selectId];
+    if (!reg) return;
+    const select = reg.select;
+    const dropdown = reg.dropdown;
+    const trigger = reg.trigger;
+    const valueSpan = trigger.querySelector('.chat-files-filter-select-value');
+
+    dropdown.innerHTML = '';
+    Array.prototype.forEach.call(select.options, function (opt) {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'chat-files-filter-select-option';
+        item.setAttribute('role', 'option');
+        item.setAttribute('data-value', opt.value);
+        if (opt.value === select.value) {
+            item.classList.add('is-selected');
+            item.setAttribute('aria-selected', 'true');
+        } else {
+            item.setAttribute('aria-selected', 'false');
+        }
+        const check = document.createElement('span');
+        check.className = 'chat-files-filter-select-check';
+        check.setAttribute('aria-hidden', 'true');
+        check.textContent = '✓';
+        const label = document.createElement('span');
+        label.className = 'chat-files-filter-select-label';
+        label.textContent = opt.textContent;
+        item.appendChild(check);
+        item.appendChild(label);
+        dropdown.appendChild(item);
+    });
+
+    const selectedOpt = select.options[select.selectedIndex];
+    if (valueSpan) {
+        valueSpan.textContent = selectedOpt ? selectedOpt.textContent : '';
+    }
+    trigger.disabled = !!select.disabled;
+    reg.wrapper.classList.toggle('is-disabled', !!select.disabled);
+}
+
+function syncAllChatFilesFilterSelects() {
+    CHAT_FILES_FILTER_SELECT_IDS.forEach(syncChatFilesFilterSelect);
+}
+
+function enhanceChatFilesFilterSelect(selectId) {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+    const existing = chatFilesFilterSelectMap[selectId];
+    if (existing && existing.select !== select) {
+        delete chatFilesFilterSelectMap[selectId];
+    }
+    if (select.dataset.chatFilesCustomSelect === '1') {
+        syncChatFilesFilterSelect(selectId);
+        return;
+    }
+    select.dataset.chatFilesCustomSelect = '1';
+    select.classList.add('chat-files-filter-native-select');
+    select.tabIndex = -1;
+    select.setAttribute('aria-hidden', 'true');
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'chat-files-filter-select-ui';
+
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'chat-files-filter-select-trigger';
+    trigger.setAttribute('aria-haspopup', 'listbox');
+    trigger.setAttribute('aria-expanded', 'false');
+    const valueSpan = document.createElement('span');
+    valueSpan.className = 'chat-files-filter-select-value';
+    trigger.appendChild(valueSpan);
+    trigger.insertAdjacentHTML('beforeend', CHAT_FILES_FILTER_SELECT_CARET);
+
+    const dropdown = document.createElement('div');
+    dropdown.className = 'chat-files-filter-select-dropdown';
+    dropdown.setAttribute('role', 'listbox');
+
+    const parent = select.parentNode;
+    parent.insertBefore(wrapper, select);
+    wrapper.appendChild(trigger);
+    wrapper.appendChild(dropdown);
+    wrapper.appendChild(select);
+
+    chatFilesFilterSelectMap[selectId] = { wrapper: wrapper, trigger: trigger, dropdown: dropdown, select: select };
+
+    trigger.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (select.disabled) return;
+        const open = wrapper.classList.contains('open');
+        closeAllChatFilesFilterSelects();
+        if (!open) {
+            wrapper.classList.add('open');
+            trigger.setAttribute('aria-expanded', 'true');
+        }
+    });
+
+    dropdown.addEventListener('click', function (e) {
+        const opt = e.target.closest('.chat-files-filter-select-option');
+        if (!opt) return;
+        e.stopPropagation();
+        const val = opt.getAttribute('data-value');
+        if (val === null) return;
+        if (select.value !== val) {
+            select.value = val;
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        wrapper.classList.remove('open');
+        trigger.setAttribute('aria-expanded', 'false');
+        syncChatFilesFilterSelect(selectId);
+    });
+
+    select.addEventListener('change', function () {
+        syncChatFilesFilterSelect(selectId);
+    });
+
+    if (!select.dataset.chatFilesFilterBound) {
+        select.dataset.chatFilesFilterBound = '1';
+        select.addEventListener('change', chatFilesGroupByChange);
+    }
+
+    syncChatFilesFilterSelect(selectId);
+}
+
+function initChatFilesFilterSelects() {
+    if (!chatFilesFilterSelectDocBound) {
+        document.addEventListener('click', closeAllChatFilesFilterSelects);
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') closeAllChatFilesFilterSelects();
+        });
+        chatFilesFilterSelectDocBound = true;
+    }
+    CHAT_FILES_FILTER_SELECT_IDS.forEach(enhanceChatFilesFilterSelect);
+    syncAllChatFilesFilterSelects();
+}
+
 function chatFilesLoadBrowsePathFromStorage() {
     try {
         const raw = localStorage.getItem(CHAT_FILES_BROWSE_PATH_KEY);
@@ -84,6 +234,7 @@ function initChatFilesPage() {
             /* ignore */
         }
     }
+    initChatFilesFilterSelects();
     setupChatFilesDragDrop();
     loadChatFilesPage();
 }
@@ -1349,7 +1500,12 @@ function setupChatFilesDragDrop() {
 document.addEventListener('languagechange', function () {
     if (typeof window.currentPage !== 'function') return;
     if (window.currentPage() !== 'chat-files') return;
+    syncAllChatFilesFilterSelects();
     if (typeof renderChatFilesTable === 'function') {
         renderChatFilesTable();
     }
+});
+
+document.addEventListener('DOMContentLoaded', function () {
+    initChatFilesFilterSelects();
 });

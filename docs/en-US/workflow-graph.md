@@ -1,6 +1,6 @@
 # CyberStrikeAI Graph Orchestration Guide
 
-[中文](workflow-graph.md)
+[中文](../zh-CN/workflow-graph.md)
 
 This document explains how to use **Graph Orchestration**: building workflows on the canvas, configuring node types, passing data between nodes, and binding a graph to a role for automatic execution.
 

@@ -26,6 +26,189 @@ function tpFmt(key, fallback, opts) {
     return text;
 }
 
+function tpFmt(key, fallback, opts) {
+    const text = tp(key, opts);
+    if (!text || text === key) return fallback;
+    return text;
+}
+
+const PROJECTS_FILTER_SELECT_HANDLERS = {
+    'project-facts-filter-category': function () { loadProjectFacts(); },
+    'project-facts-filter-confidence': function () { loadProjectFacts(); },
+    'project-graph-view': function () { loadProjectFactGraph(); },
+    'project-vulns-filter-severity': function () { loadProjectVulnerabilities(); },
+    'project-vulns-filter-status': function () { loadProjectVulnerabilities(); },
+    'projects-page-size-pagination': function () { changeProjectsPageSize(); }
+};
+const projectsFilterSelectMap = {};
+let projectsFilterSelectDocBound = false;
+const PROJECTS_FILTER_SELECT_CARET = '<svg class="projects-filter-select-caret" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+function closeAllProjectsFilterSelects() {
+    Object.keys(projectsFilterSelectMap).forEach(function (id) {
+        const reg = projectsFilterSelectMap[id];
+        if (!reg || !reg.wrapper) return;
+        reg.wrapper.classList.remove('open');
+        if (reg.trigger) reg.trigger.setAttribute('aria-expanded', 'false');
+    });
+}
+
+function pruneProjectsFilterSelectMap(root) {
+    Object.keys(projectsFilterSelectMap).forEach(function (id) {
+        const select = document.getElementById(id);
+        if (!select || (root && !root.contains(select))) {
+            delete projectsFilterSelectMap[id];
+        }
+    });
+}
+
+function syncProjectsFilterSelect(select) {
+    const reg = projectsFilterSelectMap[select.id];
+    if (!reg) return;
+    const dropdown = reg.dropdown;
+    const trigger = reg.trigger;
+    const valueSpan = trigger.querySelector('.projects-filter-select-value');
+
+    dropdown.innerHTML = '';
+    Array.prototype.forEach.call(select.options, function (opt) {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'projects-filter-select-option';
+        item.setAttribute('role', 'option');
+        item.setAttribute('data-value', opt.value);
+        if (opt.value === select.value) {
+            item.classList.add('is-selected');
+            item.setAttribute('aria-selected', 'true');
+        } else {
+            item.setAttribute('aria-selected', 'false');
+        }
+        const check = document.createElement('span');
+        check.className = 'projects-filter-select-check';
+        check.setAttribute('aria-hidden', 'true');
+        check.textContent = '✓';
+        const label = document.createElement('span');
+        label.className = 'projects-filter-select-label';
+        label.textContent = opt.textContent;
+        item.appendChild(check);
+        item.appendChild(label);
+        dropdown.appendChild(item);
+    });
+
+    const selectedOpt = select.options[select.selectedIndex];
+    if (valueSpan) {
+        valueSpan.textContent = selectedOpt ? selectedOpt.textContent : '';
+    }
+    trigger.disabled = !!select.disabled;
+    reg.wrapper.classList.toggle('is-disabled', !!select.disabled);
+}
+
+function syncAllProjectsFilterSelects() {
+    Object.keys(projectsFilterSelectMap).forEach(function (id) {
+        const select = document.getElementById(id);
+        if (select) syncProjectsFilterSelect(select);
+    });
+}
+
+function enhanceProjectsFilterSelect(select) {
+    if (!select || !select.id) return;
+    const existing = projectsFilterSelectMap[select.id];
+    if (existing && existing.select !== select) {
+        delete projectsFilterSelectMap[select.id];
+    }
+    if (select.dataset.projectsCustomSelect === '1') {
+        syncProjectsFilterSelect(select);
+        return;
+    }
+    select.dataset.projectsCustomSelect = '1';
+    select.classList.add('projects-filter-native-select');
+    select.tabIndex = -1;
+    select.setAttribute('aria-hidden', 'true');
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'projects-filter-select-ui';
+    if (select.id === 'projects-page-size-pagination') {
+        wrapper.classList.add('projects-filter-select-ui--compact');
+    }
+
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'projects-filter-select-trigger';
+    trigger.setAttribute('aria-haspopup', 'listbox');
+    trigger.setAttribute('aria-expanded', 'false');
+    const valueSpan = document.createElement('span');
+    valueSpan.className = 'projects-filter-select-value';
+    trigger.appendChild(valueSpan);
+    trigger.insertAdjacentHTML('beforeend', PROJECTS_FILTER_SELECT_CARET);
+
+    const dropdown = document.createElement('div');
+    dropdown.className = 'projects-filter-select-dropdown';
+    dropdown.setAttribute('role', 'listbox');
+
+    const parent = select.parentNode;
+    parent.insertBefore(wrapper, select);
+    wrapper.appendChild(trigger);
+    wrapper.appendChild(dropdown);
+    wrapper.appendChild(select);
+
+    projectsFilterSelectMap[select.id] = { wrapper: wrapper, trigger: trigger, dropdown: dropdown, select: select };
+
+    trigger.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (select.disabled) return;
+        const open = wrapper.classList.contains('open');
+        closeAllProjectsFilterSelects();
+        if (!open) {
+            wrapper.classList.add('open');
+            trigger.setAttribute('aria-expanded', 'true');
+        }
+    });
+
+    dropdown.addEventListener('click', function (e) {
+        const opt = e.target.closest('.projects-filter-select-option');
+        if (!opt) return;
+        e.stopPropagation();
+        const val = opt.getAttribute('data-value');
+        if (val === null) return;
+        if (select.value !== val) {
+            select.value = val;
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        wrapper.classList.remove('open');
+        trigger.setAttribute('aria-expanded', 'false');
+        syncProjectsFilterSelect(select);
+    });
+
+    select.addEventListener('change', function () {
+        syncProjectsFilterSelect(select);
+    });
+
+    if (!select.dataset.projectsFilterBound) {
+        select.dataset.projectsFilterBound = '1';
+        const handler = PROJECTS_FILTER_SELECT_HANDLERS[select.id];
+        if (typeof handler === 'function') {
+            select.addEventListener('change', handler);
+        }
+    }
+
+    syncProjectsFilterSelect(select);
+}
+
+function refreshProjectsFilterSelects() {
+    const page = document.getElementById('page-projects');
+    if (!page) return;
+    pruneProjectsFilterSelectMap(page);
+    page.querySelectorAll('select.projects-filter-select-native, #projects-page-size-pagination').forEach(function (select) {
+        enhanceProjectsFilterSelect(select);
+    });
+    if (!projectsFilterSelectDocBound) {
+        projectsFilterSelectDocBound = true;
+        document.addEventListener('click', closeAllProjectsFilterSelects);
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') closeAllProjectsFilterSelects();
+        });
+    }
+}
+
 /** 与后端 internal/project/fact_template.go 对齐 */
 const FACT_ATTACK_CHAIN_BODY_TEMPLATE = `## 结论（可验证，一句话）
 <勿仅写「存在漏洞」；写明类型 + 位置 + 触发条件>
@@ -404,6 +587,7 @@ async function initProjectsPage() {
     const page = document.getElementById('page-projects');
     if (!page || page.style.display === 'none') return;
     initProjectsModalEscape();
+    refreshProjectsFilterSelects();
     if (typeof syncAppModalBodyLock === 'function') {
         syncAppModalBodyLock();
     }
@@ -638,13 +822,14 @@ function renderProjectsPagination() {
             </div>
             <label class="pagination-page-size">
                 ${escapeHtml(tp('projects.paginationPerPage'))}
-                <select id="projects-page-size-pagination" onchange="changeProjectsPageSize()">
+                <select id="projects-page-size-pagination" class="projects-filter-select-native">
                     <option value="20" ${pageSize === 20 ? 'selected' : ''}>20</option>
                     <option value="50" ${pageSize === 50 ? 'selected' : ''}>50</option>
                     <option value="100" ${pageSize === 100 ? 'selected' : ''}>100</option>
                 </select>
             </label>
         </div>`;
+    refreshProjectsFilterSelects();
 }
 
 function renderProjectsSidebar() {
@@ -780,6 +965,7 @@ async function selectProject(id) {
     if (vulnSearchEl) vulnSearchEl.value = '';
     if (vulnSevEl) vulnSevEl.value = '';
     if (vulnStatusEl) vulnStatusEl.value = '';
+    syncAllProjectsFilterSelects();
     renderProjectsSidebar();
     updateProjectsDetailVisibility();
     try {
@@ -792,6 +978,7 @@ async function selectProject(id) {
         document.getElementById('project-edit-scope').value = p.scope_json || '';
         const statusEl = document.getElementById('project-edit-status');
         if (statusEl) statusEl.value = p.status || 'active';
+        syncAllProjectsFilterSelects();
         const pinEl = document.getElementById('project-edit-pinned');
         if (pinEl) pinEl.checked = !!p.pinned;
         updateProjectStatusPill(p.status || 'active');
@@ -2152,13 +2339,17 @@ function appendChatProjectPanelItem(list, project, selectedId, onSelect, tFn) {
     const t = tFn || tp;
     const isNone = !project.id;
     const isSelected = isNone ? !selectedId : selectedId === project.id;
+    const fullDesc = isNone
+        ? (project.description || '')
+        : (project.description || '').trim() || t('projects.sharedFactBoard');
     const desc = isNone
         ? (project.description || '')
-        : (project.description || '').trim().slice(0, 80) || t('projects.sharedFactBoard');
+        : fullDesc.slice(0, 80);
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'role-selection-item-main' + (isSelected ? ' selected' : '');
     btn.setAttribute('role', 'option');
+    btn.setAttribute('data-selection-detail', fullDesc);
     btn.onclick = () => onSelect(project.id || '');
     btn.innerHTML = `
         <div class="role-selection-item-icon-main">${isNone ? '—' : '📁'}</div>
@@ -2423,6 +2614,7 @@ function initChatProjectSelector() {
         document.addEventListener('languagechange', () => {
             renderProjectsSidebar();
             renderProjectsPagination();
+            syncAllProjectsFilterSelects();
             updateChatProjectButtonLabel();
             const panel = document.getElementById('chat-project-panel');
             if (panel && panel.style.display === 'flex') loadChatProjectPanelList();
@@ -2451,10 +2643,12 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
         initChatProjectSelector();
         initProjectListActionMenu();
+        refreshProjectsFilterSelects();
     });
 } else {
     initChatProjectSelector();
     initProjectListActionMenu();
+    refreshProjectsFilterSelects();
 }
 
 window.initProjectsPage = initProjectsPage;

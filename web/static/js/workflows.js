@@ -23,6 +23,9 @@
     let selectedElement = null;
     let workflowToolOptions = [];
     let workflowToolsLoaded = false;
+    const WORKFLOW_TOOL_SELECT_ID = 'workflow-tool-name';
+    let workflowToolSelectRegistry = null;
+    let workflowToolSelectDocBound = false;
 
     const KNOWN_NODE_LABELS = {
         start: ['开始', 'Start'],
@@ -87,7 +90,7 @@
             <div class="form-group">
                 <label>${esc(label)}</label>
                 <div class="workflow-binding-row" style="display:flex;gap:8px;">
-                    <select id="${prefix}-from" onchange="updateWorkflowTypedConfig()" style="flex:1;">${options}</select>
+                    <select id="${prefix}-from" class="workflow-form-select-native" onchange="updateWorkflowTypedConfig()" style="flex:1;">${options}</select>
                     <input type="text" id="${prefix}-field" value="${esc(field)}" placeholder="output" oninput="updateWorkflowTypedConfig()" style="flex:1;">
                 </div>
                 ${hint ? '<p class="workflow-config-hint">' + hint + '</p>' : ''}
@@ -359,6 +362,372 @@
         return workflowToolOptions;
     }
 
+    function workflowToolOptionLabel(tool) {
+        return tool.key + (tool.enabled ? '' : _t('workflows.config.toolDisabled'));
+    }
+
+    function closeWorkflowToolSelect() {
+        const reg = workflowToolSelectRegistry;
+        if (!reg || !reg.wrapper) return;
+        reg.wrapper.classList.remove('open');
+        if (reg.trigger) reg.trigger.setAttribute('aria-expanded', 'false');
+        if (reg.searchInput) reg.searchInput.value = '';
+    }
+
+    function createWorkflowToolOptionButton(value, label, selectedValue) {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'workflow-tool-select-option';
+        item.setAttribute('role', 'option');
+        item.setAttribute('data-value', value);
+        item.title = label;
+        if (value === selectedValue) {
+            item.classList.add('is-selected');
+            item.setAttribute('aria-selected', 'true');
+        } else {
+            item.setAttribute('aria-selected', 'false');
+        }
+        const check = document.createElement('span');
+        check.className = 'workflow-tool-select-check';
+        check.setAttribute('aria-hidden', 'true');
+        check.textContent = '✓';
+        const labelEl = document.createElement('span');
+        labelEl.className = 'workflow-tool-select-label';
+        labelEl.textContent = label;
+        labelEl.title = label;
+        item.appendChild(check);
+        item.appendChild(labelEl);
+        return item;
+    }
+
+    function renderWorkflowToolSelectOptions(reg, query) {
+        const { select, optionsList } = reg;
+        optionsList.innerHTML = '';
+        const q = (query || '').trim().toLowerCase();
+        let matchCount = 0;
+
+        Array.prototype.forEach.call(select.options, (opt) => {
+            if (opt.value === '') {
+                if (!q) {
+                    optionsList.appendChild(createWorkflowToolOptionButton(opt.value, opt.textContent || '', select.value));
+                }
+                return;
+            }
+            const label = opt.textContent || opt.value;
+            if (q && !label.toLowerCase().includes(q) && !opt.value.toLowerCase().includes(q)) return;
+            matchCount += 1;
+            optionsList.appendChild(createWorkflowToolOptionButton(opt.value, label, select.value));
+        });
+
+        if (matchCount === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'workflow-tool-select-empty';
+            empty.textContent = q
+                ? _t('workflows.config.noToolsFound')
+                : _t('workflows.config.noToolsAvailable');
+            optionsList.appendChild(empty);
+        }
+    }
+
+    function ensureWorkflowToolSearchUi(reg) {
+        if (reg.searchInput && reg.optionsList) return;
+        const { dropdown } = reg;
+        dropdown.innerHTML = '';
+
+        const searchWrap = document.createElement('div');
+        searchWrap.className = 'workflow-tool-select-search';
+        const searchInput = document.createElement('input');
+        searchInput.type = 'search';
+        searchInput.className = 'workflow-tool-select-search-input';
+        searchInput.setAttribute('autocomplete', 'off');
+        searchInput.setAttribute('data-i18n', 'workflows.config.searchTool');
+        searchInput.setAttribute('data-i18n-attr', 'placeholder');
+        searchInput.placeholder = _t('workflows.config.searchTool');
+        searchWrap.appendChild(searchInput);
+        dropdown.appendChild(searchWrap);
+        reg.searchInput = searchInput;
+
+        const optionsList = document.createElement('div');
+        optionsList.className = 'workflow-tool-select-options';
+        dropdown.appendChild(optionsList);
+        reg.optionsList = optionsList;
+
+        searchInput.addEventListener('input', () => renderWorkflowToolSelectOptions(reg, searchInput.value));
+        searchInput.addEventListener('click', (e) => e.stopPropagation());
+        searchInput.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+            if (e.key === 'Escape') closeWorkflowToolSelect();
+        });
+    }
+
+    function syncWorkflowToolSelect() {
+        const select = document.getElementById(WORKFLOW_TOOL_SELECT_ID);
+        const reg = workflowToolSelectRegistry;
+        if (!select || !reg || reg.select !== select) return;
+        const selected = select.options[select.selectedIndex];
+        reg.valueSpan.textContent = selected && selected.value
+            ? selected.textContent
+            : _t('workflows.config.selectTool');
+        if (reg.optionsList) {
+            renderWorkflowToolSelectOptions(reg, reg.searchInput ? reg.searchInput.value : '');
+        }
+        reg.trigger.disabled = !!select.disabled;
+        reg.wrapper.classList.toggle('is-disabled', !!select.disabled);
+    }
+
+    function enhanceWorkflowToolSelect() {
+        const select = document.getElementById(WORKFLOW_TOOL_SELECT_ID);
+        if (!select) {
+            workflowToolSelectRegistry = null;
+            return;
+        }
+        if (select.dataset.workflowToolCustom === '1' && workflowToolSelectRegistry && workflowToolSelectRegistry.select === select) {
+            syncWorkflowToolSelect();
+            return;
+        }
+        workflowToolSelectRegistry = null;
+
+        select.dataset.workflowToolCustom = '1';
+        select.classList.add('workflow-tool-native-select');
+        select.tabIndex = -1;
+        select.setAttribute('aria-hidden', 'true');
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'workflow-tool-select';
+
+        const trigger = document.createElement('button');
+        trigger.type = 'button';
+        trigger.className = 'workflow-tool-select-trigger';
+        trigger.setAttribute('aria-haspopup', 'listbox');
+        trigger.setAttribute('aria-expanded', 'false');
+        const valueSpan = document.createElement('span');
+        valueSpan.className = 'workflow-tool-select-value';
+        trigger.appendChild(valueSpan);
+        const caret = document.createElement('span');
+        caret.className = 'workflow-tool-select-caret';
+        caret.setAttribute('aria-hidden', 'true');
+        caret.textContent = '▾';
+        trigger.appendChild(caret);
+
+        const dropdown = document.createElement('div');
+        dropdown.className = 'workflow-tool-select-dropdown';
+        dropdown.setAttribute('role', 'listbox');
+
+        const parent = select.parentNode;
+        parent.insertBefore(wrapper, select);
+        wrapper.appendChild(trigger);
+        wrapper.appendChild(dropdown);
+        wrapper.appendChild(select);
+
+        workflowToolSelectRegistry = {
+            wrapper,
+            trigger,
+            dropdown,
+            select,
+            valueSpan,
+            searchInput: null,
+            optionsList: null
+        };
+
+        trigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (select.disabled) return;
+            const open = wrapper.classList.contains('open');
+            closeWorkflowToolSelect();
+            closeAllWorkflowFormSelects();
+            if (!open) {
+                wrapper.classList.add('open');
+                trigger.setAttribute('aria-expanded', 'true');
+                ensureWorkflowToolSearchUi(workflowToolSelectRegistry);
+                if (workflowToolSelectRegistry.searchInput) {
+                    workflowToolSelectRegistry.searchInput.value = '';
+                    renderWorkflowToolSelectOptions(workflowToolSelectRegistry, '');
+                    requestAnimationFrame(() => workflowToolSelectRegistry.searchInput.focus());
+                }
+            }
+        });
+
+        dropdown.addEventListener('click', (e) => {
+            const opt = e.target.closest('.workflow-tool-select-option');
+            if (!opt) return;
+            e.stopPropagation();
+            const val = opt.getAttribute('data-value');
+            if (val === null) return;
+            if (select.value !== val) {
+                select.value = val;
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            closeWorkflowToolSelect();
+            syncWorkflowToolSelect();
+        });
+
+        select.addEventListener('change', () => syncWorkflowToolSelect());
+
+        if (!workflowToolSelectDocBound) {
+            workflowToolSelectDocBound = true;
+            document.addEventListener('click', closeWorkflowToolSelect);
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') closeWorkflowToolSelect();
+            });
+        }
+
+        syncWorkflowToolSelect();
+    }
+
+    const workflowFormSelectMap = {};
+    let workflowFormSelectDocBound = false;
+    const WORKFLOW_FORM_SELECT_CARET = '<svg class="workflow-form-select-caret" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+    function closeAllWorkflowFormSelects() {
+        Object.keys(workflowFormSelectMap).forEach(function (id) {
+            const reg = workflowFormSelectMap[id];
+            if (!reg || !reg.wrapper) return;
+            reg.wrapper.classList.remove('open');
+            if (reg.trigger) reg.trigger.setAttribute('aria-expanded', 'false');
+        });
+    }
+
+    function pruneWorkflowFormSelectMap(root) {
+        Object.keys(workflowFormSelectMap).forEach(function (id) {
+            const select = document.getElementById(id);
+            if (!select || (root && !root.contains(select))) {
+                delete workflowFormSelectMap[id];
+            }
+        });
+    }
+
+    function syncWorkflowFormSelect(select) {
+        const reg = workflowFormSelectMap[select.id];
+        if (!reg) return;
+        const dropdown = reg.dropdown;
+        const trigger = reg.trigger;
+        const valueSpan = trigger.querySelector('.workflow-form-select-value');
+
+        dropdown.innerHTML = '';
+        Array.prototype.forEach.call(select.options, function (opt) {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'workflow-form-select-option';
+            item.setAttribute('role', 'option');
+            item.setAttribute('data-value', opt.value);
+            if (opt.value === select.value) {
+                item.classList.add('is-selected');
+                item.setAttribute('aria-selected', 'true');
+            } else {
+                item.setAttribute('aria-selected', 'false');
+            }
+            const check = document.createElement('span');
+            check.className = 'workflow-form-select-check';
+            check.setAttribute('aria-hidden', 'true');
+            check.textContent = '✓';
+            const label = document.createElement('span');
+            label.className = 'workflow-form-select-label';
+            label.textContent = opt.textContent;
+            item.appendChild(check);
+            item.appendChild(label);
+            dropdown.appendChild(item);
+        });
+
+        const selectedOpt = select.options[select.selectedIndex];
+        if (valueSpan) {
+            valueSpan.textContent = selectedOpt ? selectedOpt.textContent : '';
+        }
+        trigger.disabled = !!select.disabled;
+        reg.wrapper.classList.toggle('is-disabled', !!select.disabled);
+    }
+
+    function enhanceWorkflowFormSelect(select) {
+        if (!select || !select.id) return;
+        if (select.id === WORKFLOW_TOOL_SELECT_ID) return;
+        const existing = workflowFormSelectMap[select.id];
+        if (existing && existing.select !== select) {
+            delete workflowFormSelectMap[select.id];
+        }
+        if (select.dataset.workflowFormCustom === '1') {
+            syncWorkflowFormSelect(select);
+            return;
+        }
+        select.dataset.workflowFormCustom = '1';
+        select.classList.add('workflow-form-native-select');
+        select.tabIndex = -1;
+        select.setAttribute('aria-hidden', 'true');
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'workflow-form-select-ui';
+
+        const trigger = document.createElement('button');
+        trigger.type = 'button';
+        trigger.className = 'workflow-form-select-trigger';
+        trigger.setAttribute('aria-haspopup', 'listbox');
+        trigger.setAttribute('aria-expanded', 'false');
+        const valueSpan = document.createElement('span');
+        valueSpan.className = 'workflow-form-select-value';
+        trigger.appendChild(valueSpan);
+        trigger.insertAdjacentHTML('beforeend', WORKFLOW_FORM_SELECT_CARET);
+
+        const dropdown = document.createElement('div');
+        dropdown.className = 'workflow-form-select-dropdown';
+        dropdown.setAttribute('role', 'listbox');
+
+        const parent = select.parentNode;
+        parent.insertBefore(wrapper, select);
+        wrapper.appendChild(trigger);
+        wrapper.appendChild(dropdown);
+        wrapper.appendChild(select);
+
+        workflowFormSelectMap[select.id] = { wrapper: wrapper, trigger: trigger, dropdown: dropdown, select: select };
+
+        trigger.addEventListener('click', function (e) {
+            e.stopPropagation();
+            if (select.disabled) return;
+            const open = wrapper.classList.contains('open');
+            closeAllWorkflowFormSelects();
+            closeWorkflowToolSelect();
+            if (!open) {
+                wrapper.classList.add('open');
+                trigger.setAttribute('aria-expanded', 'true');
+            }
+        });
+
+        dropdown.addEventListener('click', function (e) {
+            const opt = e.target.closest('.workflow-form-select-option');
+            if (!opt) return;
+            e.stopPropagation();
+            const val = opt.getAttribute('data-value');
+            if (val === null) return;
+            if (select.value !== val) {
+                select.value = val;
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            wrapper.classList.remove('open');
+            trigger.setAttribute('aria-expanded', 'false');
+            syncWorkflowFormSelect(select);
+        });
+
+        select.addEventListener('change', function () {
+            syncWorkflowFormSelect(select);
+        });
+
+        syncWorkflowFormSelect(select);
+    }
+
+    function refreshWorkflowPropertySelects() {
+        const form = document.getElementById('workflow-property-form');
+        if (!form || form.hidden) return;
+        pruneWorkflowFormSelectMap(form);
+        form.querySelectorAll('select').forEach(function (select) {
+            if (select.id === WORKFLOW_TOOL_SELECT_ID) return;
+            enhanceWorkflowFormSelect(select);
+        });
+        if (!workflowFormSelectDocBound) {
+            workflowFormSelectDocBound = true;
+            document.addEventListener('click', closeAllWorkflowFormSelects);
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') closeAllWorkflowFormSelects();
+            });
+        }
+    }
+
     function readWorkflowMetaFromForm() {
         const idEl = document.getElementById('workflow-id');
         const nameEl = document.getElementById('workflow-name');
@@ -504,6 +873,7 @@
             layoutWorkflowGraph(false);
         }
         selectWorkflowElement(null);
+        closeWorkflowDryRunPanel();
         updateEmptyState();
         renderWorkflowList();
         setTimeout(() => cy && cy.resize(), 0);
@@ -580,7 +950,7 @@
         return `
             <div class="form-group">
                 <label for="workflow-join-strategy">${esc(_t('workflows.config.joinStrategy') || '汇聚策略')}</label>
-                <select id="workflow-join-strategy" onchange="updateWorkflowTypedConfig()">
+                <select id="workflow-join-strategy" class="workflow-form-select-native" onchange="updateWorkflowTypedConfig()">
                     ${JOIN_STRATEGIES.map(strategy => `<option value="${strategy}" ${strategy === selected ? 'selected' : ''}>${strategy}</option>`).join('')}
                 </select>
                 <p class="workflow-config-hint">${esc(_t('workflows.config.joinStrategyHint') || '多个上游进入同一节点时如何生成 previous。')}</p>
@@ -624,7 +994,7 @@
                 ${sourceType === 'condition' ? `
                     <div class="form-group">
                         <label for="workflow-edge-branch">${esc(_t('workflows.config.edgeBranch') || '条件分支')}</label>
-                        <select id="workflow-edge-branch" onchange="updateWorkflowTypedConfig()">
+                        <select id="workflow-edge-branch" class="workflow-form-select-native" onchange="updateWorkflowTypedConfig()">
                             <option value="">${esc(_t('workflows.config.selectBranch') || '请选择')}</option>
                             <option value="true" ${cfg.branch === 'true' ? 'selected' : ''}>true / 是</option>
                             <option value="false" ${cfg.branch === 'false' ? 'selected' : ''}>false / 否</option>
@@ -633,6 +1003,7 @@
                     <p class="workflow-config-hint">${esc(_t('workflows.config.edgeBranchHint'))}</p>
                 ` : ''}
             `;
+            refreshWorkflowPropertySelects();
             return;
         }
         const type = ele.data('type') || 'tool';
@@ -644,7 +1015,7 @@
                 wrap.innerHTML = `
                     ${joinStrategyHtml(cfg)}
                     <div class="form-group">
-                        <label for="workflow-tool-name">${esc(_t('workflows.config.mcpTool'))}</label>
+                        <label>${esc(_t('workflows.config.mcpTool'))}</label>
                         <select id="workflow-tool-name" onchange="updateWorkflowTypedConfig()">
                             <option value="">${esc(_t('workflows.config.selectTool'))}</option>
                             ${workflowToolOptions.map(tool => `<option value="${esc(tool.key)}" ${tool.key === cfg.tool_name ? 'selected' : ''}>${esc(tool.key)}${tool.enabled ? '' : esc(_t('workflows.config.toolDisabled'))}</option>`).join('')}
@@ -653,6 +1024,7 @@
                     ${typedTextarea('workflow-tool-arguments', _t('workflows.config.argumentsStatic'), cfg.arguments, '{"target":"example.com"}')}
                     ${typedField('workflow-tool-timeout', _t('workflows.config.timeoutSeconds'), cfg.timeout_seconds, _t('workflows.config.optional'))}
                 `;
+                enhanceWorkflowToolSelect();
                 if (!workflowToolsLoaded) {
                     loadWorkflowTools().then(() => {
                         if (selectedElement === ele) renderTypedConfig(ele);
@@ -664,7 +1036,7 @@
                     ${joinStrategyHtml(cfg)}
                     <div class="form-group">
                         <label for="workflow-agent-mode">${esc(_t('workflows.config.agentMode'))}</label>
-                        <select id="workflow-agent-mode" onchange="updateWorkflowTypedConfig()">
+                        <select id="workflow-agent-mode" class="workflow-form-select-native" onchange="updateWorkflowTypedConfig()">
                             ${AGENT_MODES.map(mode => `<option value="${mode}" ${mode === cfg.agent_mode ? 'selected' : ''}>${mode}</option>`).join('')}
                         </select>
                     </div>
@@ -689,7 +1061,7 @@
                     <p class="workflow-config-hint">${_t('workflows.config.hitlInteractiveHint')}</p>
                     <div class="form-group">
                         <label for="workflow-hitl-reviewer">${esc(_t('workflows.config.hitlReviewer'))}</label>
-                        <select id="workflow-hitl-reviewer" onchange="updateWorkflowTypedConfig()">
+                        <select id="workflow-hitl-reviewer" class="workflow-form-select-native" onchange="updateWorkflowTypedConfig()">
                             <option value="human" ${cfg.reviewer === 'human' ? 'selected' : ''}>human</option>
                             <option value="audit_agent" ${cfg.reviewer === 'audit_agent' ? 'selected' : ''}>audit_agent</option>
                         </select>
@@ -710,6 +1082,7 @@
             default:
                 wrap.innerHTML = '';
         }
+        refreshWorkflowPropertySelects();
     }
 
     function renderCustomFields(config) {
@@ -1209,6 +1582,14 @@
         }
     }
 
+    function closeWorkflowDryRunPanel() {
+        const panel = document.getElementById('workflow-dry-run-panel');
+        const output = document.getElementById('workflow-dry-run-output');
+        if (!panel) return;
+        panel.hidden = true;
+        if (output) output.innerHTML = '';
+    }
+
     function renderWorkflowDryRunTrace(result) {
         const panel = document.getElementById('workflow-dry-run-panel');
         const output = document.getElementById('workflow-dry-run-output');
@@ -1228,6 +1609,8 @@
             </div>`;
         }).join('');
     }
+
+    window.closeWorkflowDryRunPanel = closeWorkflowDryRunPanel;
 
     window.saveWorkflowDraft = async function () {
         initCy();
@@ -1312,8 +1695,9 @@
             console.log(result);
             console.groupEnd();
             renderWorkflowDryRunTrace(result);
-            const summary = trace.slice(0, 8).map(item => `${item.label || item.nodeId}: ${item.status}`).join('\n');
-            window.alert((_t('workflows.dryRunDone') || 'Dry-run completed') + '\n\n' + summary);
+            if (typeof showNotification === 'function') {
+                showNotification(_t('workflows.dryRunDone') || 'Dry-run completed', 'success');
+            }
         } catch (error) {
             showNotification(error.message || _t('workflows.dryRunFailed'), 'error');
         }
@@ -1473,6 +1857,9 @@
             `<option value="${esc(wf.id)}">${esc(wf.name || wf.id)}${wf.enabled ? '' : esc(_t('roleModal.workflowDisabledSuffix'))}</option>`
         )).join('');
         select.value = current || '';
+        if (typeof window.refreshRoleModalSelects === 'function') {
+            window.refreshRoleModalSelects();
+        }
     };
 
     function refreshCanvasLabels() {

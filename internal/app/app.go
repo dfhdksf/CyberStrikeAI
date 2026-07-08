@@ -303,11 +303,11 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 				return
 			}
 
-			// 只有在没有索引时才自动重建
+			// 冷启动：仅为尚无向量的知识项构建索引（与 IndexMissing 语义一致）
 			log.Logger.Info("未检测到知识库索引，开始自动构建索引")
 			ctx := context.Background()
-			if err := knowledgeIndexer.RebuildIndex(ctx); err != nil {
-				log.Logger.Warn("重建知识库索引失败", zap.Error(err))
+			if err := knowledgeIndexer.IndexMissing(ctx); err != nil {
+				log.Logger.Warn("自动构建知识库索引失败", zap.Error(err))
 			}
 		}()
 	}
@@ -1084,7 +1084,7 @@ func setupRoutes(
 					})
 					return
 				}
-				app.knowledgeHandler.RebuildIndex(c)
+				app.knowledgeHandler.StartIndex(c)
 			})
 			knowledgeRoutes.POST("/scan", func(c *gin.Context) {
 				if app.knowledgeHandler == nil {
@@ -1974,11 +1974,11 @@ func initializeKnowledge(
 			return
 		}
 
-		// 只有在没有索引时才自动重建
+		// 冷启动：仅为尚无向量的知识项构建索引（与 IndexMissing 语义一致）
 		logger.Info("未检测到知识库索引，开始自动构建索引")
 		ctx := context.Background()
-		if err := knowledgeIndexer.RebuildIndex(ctx); err != nil {
-			logger.Warn("重建知识库索引失败", zap.Error(err))
+		if err := knowledgeIndexer.IndexMissing(ctx); err != nil {
+			logger.Warn("自动构建知识库索引失败", zap.Error(err))
 		}
 	}()
 

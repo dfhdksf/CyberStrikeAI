@@ -1,0 +1,275 @@
+# 配置参考
+
+CyberStrikeAI 的主配置文件是 `config.yaml`。大多数配置也可以在 Web 的“系统设置”中修改，保存后再应用。生产环境中，建议把敏感值放在受控配置系统中，并限制 `config.yaml` 的文件权限。
+
+## 基础配置
+
+```yaml
+version: "v1.6.51"
+server:
+  host: 0.0.0.0
+  port: 8080
+  tls_enabled: true
+  tls_auto_self_sign: true
+auth:
+  password: "change-me"
+  session_duration_hours: 12
+log:
+  level: info
+  output: stdout
+```
+
+- `version`：前端展示版本。
+- `server.host/port`：Web 服务监听地址和端口。
+- `server.tls_*`：HTTPS 配置。生产环境建议使用 `tls_cert_path` 和 `tls_key_path`。
+- `auth.password`：Web 登录密码，必须改为强密码。
+- `auth.session_duration_hours`：登录会话有效期。
+- `log.output`：可以是 `stdout`、`stderr` 或文件路径。
+
+## 模型配置
+
+```yaml
+openai:
+  provider: openai
+  base_url: https://api.openai.com/v1
+  api_key: sk-...
+  model: gpt-4.1
+  max_total_tokens: 120000
+  reasoning:
+    mode: on
+    effort: high
+    allow_client_reasoning: true
+    profile: openai_compat
+```
+
+- `provider`：`openai` 表示 OpenAI 兼容接口；`claude` 会桥接到 Anthropic Claude Messages API。
+- `base_url/api_key/model`：主模型配置。
+- `max_total_tokens`：上下文压缩、攻击链构建、多代理摘要等共用的总预算。
+- `reasoning`：控制推理扩展字段。不同网关支持差异较大，异常时先尝试 `mode: off`。
+
+## Agent
+
+```yaml
+agent:
+  max_iterations: 12000
+  tool_timeout_minutes: 60
+  shell_no_output_timeout_seconds: 1200
+  workspace_root_dir: ""
+  system_prompt_path: ""
+```
+
+- `max_iterations`：单代理、多代理主执行器和子代理的默认迭代上限。
+- `tool_timeout_minutes`：单次工具最长运行时间。
+- `shell_no_output_timeout_seconds`：Shell 长时间无输出时终止。
+- `workspace_root_dir`：会话工作区根目录，建议不要设置到系统 `/tmp`。
+- `system_prompt_path`：单代理系统提示词覆盖文件。
+
+## HITL
+
+```yaml
+hitl:
+  default_reviewer: audit_agent
+  retention_days: 90
+  tool_whitelist: [read_file, list_dir, glob, grep, tool_search]
+  audit_model:
+    provider: ""
+    base_url: ""
+    api_key: ""
+    model: ""
+```
+
+- `default_reviewer`：`human` 或 `audit_agent`。
+- `tool_whitelist`：全局免审批工具列表，会与会话白名单合并。
+- `audit_model`：审计 Agent 独立模型；留空复用主模型。
+- `audit_agent_prompt` / `audit_agent_prompt_review_edit`：可覆盖默认审批策略。
+
+更多策略见 [人机协同最佳实践](hitl-best-practices.md)。
+
+## 多代理
+
+```yaml
+multi_agent:
+  enabled: true
+  robot_default_agent_mode: eino_single
+  batch_use_multi_agent: false
+  eino_skills:
+    disable: false
+    filesystem_tools: true
+    skill_tool_name: skill
+```
+
+支持模式：
+
+- `eino_single`：Eino 单代理。
+- `deep`：DeepAgent 风格多代理。
+- `plan_execute`：规划、执行、重规划。
+- `supervisor`：主管代理转交子代理。
+
+`agents_dir` 指向 Markdown 子代理目录。单个代理可在 front matter 中设置 `tools`、`bind_role`、`max_iterations`。
+
+## 工具与 MCP
+
+```yaml
+security:
+  tools_dir: tools
+  tool_description_mode: full
+mcp:
+  enabled: false
+  host: 0.0.0.0
+  port: 8081
+  auth_header: "X-MCP-Token"
+  auth_header_value: ""
+external_mcp:
+  servers: {}
+```
+
+- `security.tools_dir`：内置工具 YAML 目录。
+- `tool_description_mode`：`short` 更省 token，`full` 更完整。
+- `mcp.enabled`：是否启动独立 HTTP MCP 服务。
+- `mcp.auth_header_value`：外部调用 MCP 时的共享密钥，生产环境必须设置。
+- `external_mcp.servers`：外部 MCP 联邦配置。
+
+工具 YAML 规则见 `tools/README.md`。
+
+## 知识库
+
+```yaml
+knowledge:
+  enabled: false
+  base_path: knowledge_base
+  embedding:
+    provider: openai
+    model: text-embedding-v4
+    base_url: ""
+    api_key: ""
+  retrieval:
+    top_k: 5
+    similarity_threshold: 0.4
+  indexing:
+    chunk_size: 512
+    chunk_overlap: 50
+    batch_size: 10
+```
+
+启用后会注册知识库检索工具，并开放管理接口。详细说明见 [知识库](knowledge-base.md)。
+
+## 数据库
+
+```yaml
+database:
+  path: data/conversations.db
+  knowledge_db_path: data/knowledge.db
+```
+
+默认使用 SQLite。`knowledge_db_path` 为空时可复用会话数据库；独立文件更便于迁移知识库。
+
+## 审计与监控
+
+```yaml
+audit:
+  enabled: true
+  retention_days: 15
+  max_detail_bytes: 8192
+monitor:
+  retention_days: 90
+```
+
+- `audit` 记录平台操作，不记录对话正文和每次工具调用正文。
+- `monitor` 管理工具执行记录保留时间。
+
+## C2、WebShell、项目
+
+```yaml
+c2:
+  enabled: true
+project:
+  enabled: true
+  fact_index_max_runes: 65000
+```
+
+- `c2.enabled`：关闭后不启动 C2 监听器，也不注册 C2 MCP 工具。
+- WebShell 连接配置存 SQLite，没有单独的主配置开关。
+- `project` 控制跨对话事实黑板注入预算。
+
+## 机器人
+
+`robots` 支持个人微信 iLink、企业微信、钉钉、飞书、Telegram、Slack、Discord、QQ。详细配置步骤见 [机器人使用说明](robot.md)。
+
+## 配置修改建议
+
+- 先在测试环境验证模型、MCP、知识库和高风险工具。
+- 改动 `tools_dir`、`roles_dir`、`skills_dir`、`agents_dir` 后，检查 Web 页面是否能列出对应资源。
+- 生产环境避免开启不需要的 C2、WebShell、终端和外部 MCP。
+- 修改敏感配置后，检查审计页面是否有异常登录或配置变更记录。
+
+## 配置应用机制
+
+配置不是所有字段都同等“热更新”。`/api/config/apply` 会做一组协调动作：更新模型配置、工具描述模式、重新注册部分 MCP 工具、初始化或更新知识库、重启机器人连接、按配置启停 C2。这个逻辑在 `internal/handler/config.go` 中由 `ConfigHandler` 协调。
+
+实务判断：
+
+| 配置段 | 应用后通常立即生效 | 需要额外动作 |
+| --- | --- | --- |
+| `openai` | 新请求使用新模型配置 | 旧的流式请求不会被强制切换 |
+| `agent.max_iterations` | 新 Agent 任务生效 | 已运行任务按启动时状态继续 |
+| `security.tool_description_mode` | 工具重新暴露时生效 | 模型已有上下文不会回滚 |
+| `hitl.tool_whitelist` | 新工具调用审批判断生效 | 已挂起审批不自动重判 |
+| `knowledge.enabled` | 会尝试初始化/更新组件 | 启用后仍需扫描和索引 |
+| `knowledge.embedding` | 检索器/索引器配置更新 | 已有向量通常需要重建索引 |
+| `robots` | 会触发连接重启 | 平台回调配置仍需在平台侧正确 |
+| `c2.enabled` | 会协调 C2 runtime | 已暴露端口和会话要人工确认 |
+| `server.port/tls` | 通常需要重启进程 | 监听地址不是普通热更新 |
+
+## 配置优先级和派生关系
+
+几个字段有“留空复用”的关系：
+
+- `vision.api_key/base_url/provider` 留空时复用 `openai`。
+- `hitl.audit_model` 留空时复用 `openai`。
+- `knowledge.embedding.base_url/api_key` 留空时复用主模型或 embedding 默认配置。
+- `knowledge.retrieval.rerank.base_url/api_key` 留空时复用 embedding/openai。
+- `database.knowledge_db_path` 留空时可以复用主会话数据库，但独立文件更利于备份。
+
+这类配置排障时不要只看子配置段，也要看它会回落到哪个上级配置。
+
+## 参数取值建议
+
+| 参数 | 保守值 | 激进值 | 判断依据 |
+| --- | --- | --- | --- |
+| `agent.tool_timeout_minutes` | 10-30 | 60+ | 扫描工具是否常跑长任务 |
+| `shell_no_output_timeout_seconds` | 300-600 | 1200+ | 工具是否长时间静默 |
+| `knowledge.indexing.batch_size` | 5-10 | 20+ | embedding 服务批量限制 |
+| `knowledge.indexing.rate_limit_delay_ms` | 300-800 | 0-100 | 服务商 RPM 和 429 情况 |
+| `retrieval.top_k` | 3-5 | 8-12 | 内容质量和上下文预算 |
+| `similarity_threshold` | 0.35-0.45 | 0.5+ | 召回优先还是精度优先 |
+| `audit.retention_days` | 15-30 | 90+ | 合规要求和磁盘空间 |
+| `monitor.retention_days` | 30-90 | 180+ | 是否需要长周期复盘 |
+
+## 变更前后验证模板
+
+修改配置前记录：
+
+```text
+变更目的：
+涉及配置段：
+预期影响：
+回滚方式：
+验证接口：
+```
+
+修改后验证：
+
+```bash
+curl -k https://127.0.0.1:8080/api/auth/validate \
+  -H "Authorization: Bearer <token>"
+```
+
+再按配置类型验证模型、工具、知识库、C2 或机器人。不要只看 Web 保存成功提示。
+
+## 源码锚点
+
+- 配置结构：`internal/config/config.go`
+- 环境变量展开：`internal/config/envexpand.go`
+- Web 配置接口：`internal/handler/config.go`
+- 路由注册：`internal/app/app.go`
+- C2 配置协调：`internal/app/c2_lifecycle.go`

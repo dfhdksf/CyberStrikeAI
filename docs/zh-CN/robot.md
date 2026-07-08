@@ -1,6 +1,6 @@
 # CyberStrikeAI 机器人使用说明
 
-[English](robot_en.md)
+[English](../en-US/robot.md)
 
 本文档说明如何通过**个人微信**、**钉钉**、**飞书**与 **企业微信** 与 CyberStrikeAI 对话（长连接 / 回调模式），在手机端即可使用，无需在服务器上打开网页。按下面步骤操作可避免常见弯路。
 

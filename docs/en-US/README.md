@@ -1,0 +1,29 @@
+# English Docs
+
+- [Deployment Guide](deployment.md): deployment modes, HTTPS, reverse proxy, systemd, backup, upgrade, and acceptance checks.
+- [Runbooks](runbooks.md): operational steps for production setup, external MCP, KB, Web testing, C2 cleanup, and tool debugging.
+- [Configuration Profiles](configuration-profiles.md): recommended profiles for dev, internal team, knowledge-only, production, C2, and MCP automation.
+- [Security Hardening](security-hardening.md): pre-launch baseline, reverse proxy, HITL allowlist, file permissions, and periodic review.
+- [API Recipes](api-recipes.md): examples for login, Agent, streaming, multi-agent, uploads, vulnerabilities, KB, MCP, and audit export.
+- [Contributing Guide](contributing-guide.md): checklists for APIs, config, tools, frontend, DB, high-risk features, and docs.
+- [Configuration Reference](configuration.md): `config.yaml` fields, hot-apply boundaries, recommended values, and source anchors.
+- [Security Model](security-model.md): trust boundaries, HITL, tool execution, C2/WebShell, and data safety.
+- [Architecture](architecture.md): request flow, module relationships, complexity hotspots, and design trade-offs.
+- [API Reference](api-reference.md): authentication, OpenAPI, SSE, stability tiers, and common endpoints.
+- [Troubleshooting](troubleshooting.md): diagnostic order, minimal commands, common misdiagnoses, and issue template.
+- [Audit and Monitoring](audit-and-monitoring.md): platform audit, tool monitoring, HITL logs, and retention.
+- [Knowledge Base](knowledge-base.md): indexing pipeline, retrieval tuning, log analysis, and content writing.
+- [C2 Guide](c2.md): lifecycle, task classification, event review, and safety guidance.
+- [WebShell Management](webshell.md): operation tiers, naming, AI guardrails, and troubleshooting.
+- [MCP Federation](mcp-federation.md): built-in MCP, external MCP, lifecycle, and tool naming.
+- [Agent and Role Guide](agent-and-role-guide.md): roles, sub-agents, Skills, orchestration modes, and tool visibility.
+- [Skills Guide](skills-guide.md): Skill structure, progressive disclosure, anti-patterns, and local-tool risk.
+- [Plugin Development](plugin-development.md): API plugins, MCP plugins, resource-pack plugins, and security boundaries.
+- [Release Process](release-process.md): release risk, config compatibility, DB migrations, and acceptance checks.
+- [Testing Guide](testing.md): test layers, regression focus, test data, and failure cases.
+- [Graph Orchestration Guide](workflow-graph.md)
+- [HITL Best Practices](hitl-best-practices.md)
+- [Robot / Chatbot Guide](robot.md)
+- [Vision Analysis](VISION.md)
+- [Frontend i18n](frontend-i18n.md)
+- [Eino Multi-Agent Notes](MULTI_AGENT_EINO.md)

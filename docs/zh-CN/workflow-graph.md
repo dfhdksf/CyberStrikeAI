@@ -1,6 +1,6 @@
 # CyberStrikeAI 图编排使用说明
 
-[English](workflow-graph_en.md)
+[English](../en-US/workflow-graph.md)
 
 本文档说明 **图编排（Graph Orchestration）** 的完整使用方式：如何在画布上搭建流程、配置各类型节点、在节点之间传递数据，以及如何将流程绑定到角色并自动运行。
 

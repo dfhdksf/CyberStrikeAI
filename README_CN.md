@@ -8,6 +8,12 @@
 
 **社区**：[加入 Discord](https://discord.gg/8PjVCMu8Zw)
 
+**CyberStrikeAI 正在构建现代网络安全的智能体执行层。**
+
+它将 AI 智能体、安全工具、MCP 原生集成、知识系统、人工监督与攻击链智能汇聚到一个面向授权安全任务的统一工作空间中。CyberStrikeAI 不再把工具、提示词、证据、审批和报告视为割裂环节，而是将安全意图转化为可规划、可执行、可审查、可复盘、可持续沉淀上下文的多智能体工作流。
+
+CyberStrikeAI 基于 Go 构建，为 AI 原生安全运营提供完整底座：100+ 精选工具配方、角色化测试、Agent Skills、基于 Eino 的单智能体与多智能体编排、RAG 知识检索、图工作流、漏洞与任务生命周期管理、WebShell 运营、机器人接入，以及面向授权实验室和安全任务场景的内置轻量 C2 框架。
+
 <details>
 <summary><strong>微信群</strong>（点击展开二维码）</summary>
 
@@ -25,8 +31,6 @@
 </div>
 
 </details>
-
-CyberStrikeAI 是一款 **AI 原生安全测试平台**，基于 Go 构建，集成了 100+ 安全工具、智能编排引擎、角色化测试与预设安全测试角色、Skills 技能系统与专业测试技能、完整的测试生命周期管理能力，以及面向 **授权场景** 的 **内置轻量 C2（Command & Control，指挥与控制）** 能力（监听器、加密通信、会话与任务、实时事件、REST 与 MCP 协同）。通过原生 MCP 协议与 AI 智能体，支持从对话指令到漏洞发现、攻击链分析、知识检索与结果可视化的全流程自动化，为安全团队提供可审计、可追溯、可协作的专业测试环境。
 
 ## 界面与集成预览
 
@@ -114,24 +118,26 @@ CyberStrikeAI 是一款 **AI 原生安全测试平台**，基于 Go 构建，集
 
 ## 特性速览
 
-- 🤖 兼容 OpenAI/DeepSeek/Claude 等模型的智能决策引擎
-- 🔌 原生 MCP 协议，支持 HTTP / stdio / SSE 传输模式以及外部 MCP 接入
-- 🧰 100+ 现成工具模版 + YAML 扩展能力
+- 🤖 面向智能体时代的执行层，将自然语言意图转化为精准、受控、可审计的安全行动
+- 🧩 基于 Eino 的单智能体与多智能体编排，支持 Deep、Plan-Execute、Supervisor 等模式
+- 🔌 MCP 原生工具执行，支持 HTTP / stdio / SSE 传输、外部 MCP 联邦与动态工具发现
+- 🧰 100+ 精选安全工具配方、YAML 扩展机制与按角色收敛的工具控制
 - 📄 大结果分页、压缩与全文检索
-- 🔗 攻击链可视化、风险打分与步骤回放
-- 🔒 Web 登录保护、审计日志、SQLite 持久化
+- 🔗 攻击链智能分析，支持图谱视图、风险打分、项目事实沉淀与步骤回放
+- 🧑‍⚖️ 人机协同治理，支持审批模式、免审批白名单、审计 Agent 复核与可追溯决策
+- 🔒 Web 登录保护、审计日志、SQLite 持久化与行动证据留存
 - 📚 知识库（RAG）：**Eino MultiQuery** 查询改写 + 多路向量检索 + **HTTP 精排**（DashScope `gte-rerank` / Cohere 兼容）+ 后处理（去重、预算）；索引侧为 **Eino Compose** 流水线
 - 📁 对话分组管理：支持分组创建、置顶、重命名、删除等操作
 - 📂 **项目管理**：共享事实（黑板）跨会话沉淀认知，`upsert_project_fact` + `links` 串联攻击路径；聊天攻击链与项目事实图可视化
 - 🛡️ 漏洞管理功能：完整的漏洞 CRUD 操作，支持严重程度分级、状态流转、按对话/严重程度/状态过滤，以及统计看板
 - 📋 批量任务管理：创建任务队列，批量添加任务，依次顺序执行，支持任务编辑与状态跟踪
 - 🎭 角色化测试：预设安全测试角色（渗透测试、CTF、Web 应用扫描等），支持自定义提示词和工具限制
-- 🔀 **图编排**：可视化流程编排（开始 / Agent / 工具 / 条件 / 审批 / 输出），节点间用 `{{previous.output}}` 或 `{{outputs.变量名}}` 传参；绑定角色后对话自动按图执行。详见 [图编排使用说明](docs/workflow-graph.md)
-- 🧩 **Agent 编排（CloudWeGo Eino）**：**单代理** `POST /api/eino-agent/stream`（Eino ADK）；**多代理** `POST /api/multi-agent/stream`，`orchestration` 选 **`deep`** / **`plan_execute`** / **`supervisor`**。ADK **Summarization** 在上下文过长时压缩历史；压缩前将可恢复 **转录** 写入 `data/conversation_artifacts/<会话ID>/summarization/transcript.txt`（保留完整 user/assistant/tool 轮次，省略静态 system）。`agents/` 下主代理与子代理 Markdown 见 [多代理说明](docs/MULTI_AGENT_EINO.md)
-- 🖼️ **视觉分析（`analyze_image`）**：独立 Vision 模型（如 `qwen-vl-max`），MCP 工具分析本地截图/验证码/UI；图片仅在单次 VL 调用中出现，对话上下文只保留文字摘要。配置见 `config.yaml` → `vision` 与 [视觉分析说明](docs/VISION.md)
+- 🔀 **图编排**：可视化流程编排（开始 / Agent / 工具 / 条件 / 审批 / 输出），节点间用 `{{previous.output}}` 或 `{{outputs.变量名}}` 传参；绑定角色后对话自动按图执行。详见 [图编排使用说明](docs/zh-CN/workflow-graph.md)
+- 🧩 **Agent 编排（CloudWeGo Eino）**：**单代理** `POST /api/eino-agent/stream`（Eino ADK）；**多代理** `POST /api/multi-agent/stream`，`orchestration` 选 **`deep`** / **`plan_execute`** / **`supervisor`**。ADK **Summarization** 在上下文过长时压缩历史；压缩前将可恢复 **转录** 写入 `data/conversation_artifacts/<会话ID>/summarization/transcript.txt`（保留完整 user/assistant/tool 轮次，省略静态 system）。`agents/` 下主代理与子代理 Markdown 见 [多代理说明](docs/zh-CN/MULTI_AGENT_EINO.md)
+- 🖼️ **视觉分析（`analyze_image`）**：独立 Vision 模型（如 `qwen-vl-max`），MCP 工具分析本地截图/验证码/UI；图片仅在单次 VL 调用中出现，对话上下文只保留文字摘要。配置见 `config.yaml` → `vision` 与 [视觉分析说明](docs/zh-CN/VISION.md)
 - 🎯 **Skills（面向 Eino 重构）**：技能包放在 **`skills_dir`**，遵循 **Agent Skills** 目录规范（`SKILL.md` + 可选文件）；**多代理** 下通过 Eino 官方 **`skill`** 工具 **渐进式披露**（按 name 加载）。**`multi_agent.eino_skills`** 控制是否启用、本机文件/Shell 工具、工具名覆盖；**`eino_middleware`** 可选 patch、tool_search、**plantask**（`TaskCreate` / `TaskList` 任务板，落在 `skills_dir/.eino/plantask/`）、reduction、文件型 **checkpoint**（`checkpoint_dir`）、ChatModel **重试**、会话 **输出键** 及 Deep 调参。20+ 领域示例仍可绑定角色
-- 📱 **机器人**：支持钉钉、飞书长连接，在手机端与 CyberStrikeAI 对话（配置与命令详见 [机器人使用说明](docs/robot.md)）
-- 🧑‍⚖️ **人机协同（HITL）**：对话页侧栏配置协同模式与免审批工具白名单；全局列表在 `config.yaml` 的 `hitl.tool_whitelist`；点「应用」可将新增工具合并写入配置文件且**无需重启**即可生效；导航 **人机协同** 页处理待审批工具调用
+- 📱 **机器人**：个人微信、企业微信、钉钉、飞书、Telegram、Slack、Discord、QQ 机器人，在手机或 IM 中与 CyberStrikeAI 对话（详见 [机器人使用说明](docs/zh-CN/robot.md)）
+- 🧑‍⚖️ **人机协同（HITL）**：对话页侧栏配置协同模式与免审批工具白名单；全局列表在 `config.yaml` 的 `hitl.tool_whitelist`；审计 Agent 可通过 `hitl.audit_model` 使用独立小模型；点「应用」可将新增工具合并写入配置文件且**无需重启**即可生效；导航 **人机协同** 页处理待审批工具调用。详见 [人机协同最佳实践](docs/zh-CN/hitl-best-practices.md)
 - 🐚 **WebShell 管理**：添加与管理 WebShell 连接（兼容冰蝎/蚁剑等），通过虚拟终端执行命令、内置文件管理进行文件操作，并提供按连接维度保存历史的 AI 助手标签页；支持 PHP/ASP/ASPX/JSP 及自定义类型，可配置请求方法与命令参数。
 - 📡 **内置 C2**：面向 AI 协同的轻量 **C2**——**多种监听器**（TCP 反向、HTTP/HTTPS Beacon、WebSocket）、**加密** Beacon 信道、**会话与任务**队列及持久化、**Payload** 辅助（一键命令 / 构建 / 下载）、**SSE** 实时事件、REST（`/api/c2/*`）及智能体侧 **一组 C2 MCP 工具**（如 `c2_listener`、`c2_session`、**`c2_task`**、`c2_task_manage`、`c2_payload`、`c2_event`、`c2_profile`、`c2_file`）；敏感操作可对接 **人机协同（HITL）**，并支持 OPSEC 类规则（如命令拒绝正则）。**仅限授权测试。**
 
@@ -142,6 +148,11 @@ CyberStrikeAI 是一款 **AI 原生安全测试平台**，基于 Go 构建，集
 - **Burp Suite 插件**：`plugins/burp-suite/cyberstrikeai-burp-extension/`  
   构建产物：`plugins/burp-suite/cyberstrikeai-burp-extension/dist/cyberstrikeai-burp-extension.jar`  
   说明文档：`plugins/burp-suite/cyberstrikeai-burp-extension/README.zh-CN.md`
+- **浏览器扩展（Chrome / Edge）**：`plugins/browser-extension/cyberstrikeai-browser-extension/`  
+  在 DevTools 中捕获 Network 流量并发送到 CyberStrikeAI 进行 AI 辅助安全测试，能力与 Burp 插件对齐。  
+  安装：`chrome://extensions/` → 加载已解压 → F12 → **CyberStrikeAI** 标签页  
+  打包产物：`plugins/browser-extension/cyberstrikeai-browser-extension/dist/cyberstrikeai-browser-extension.zip`  
+  说明文档：`plugins/browser-extension/cyberstrikeai-browser-extension/README.zh-CN.md`
 
 ## 工具概览
 
@@ -254,7 +265,7 @@ go build -o cyberstrike-ai cmd/server/main.go
 - **对话测试**：自然语言触发多步工具编排，SSE 实时输出。
 - **单代理 / 多代理**：聊天可选 **Eino 单代理**（`/api/eino-agent/stream`）与 **多代理**（`/api/multi-agent/stream` + `orchestration`）。多代理需 `multi_agent.enabled: true`。MCP 工具桥接一致。
 - **角色化测试**：从预设的安全测试角色（渗透测试、CTF、Web 应用扫描、API 安全测试等）中选择，自定义 AI 行为和可用工具。每个角色可应用自定义系统提示词，并可限制可用工具列表，实现聚焦的测试场景。
-- **图编排**：在 **图编排** 页拖拽节点、连线并保存流程；在角色中绑定 `workflow_id` 后，该角色对话将按图执行（Agent、MCP 工具、条件分支等）。跨节点传参优先用 `{{outputs.变量名}}`。详见 [图编排使用说明](docs/workflow-graph.md)。
+- **图编排**：在 **图编排** 页拖拽节点、连线并保存流程；在角色中绑定 `workflow_id` 后，该角色对话将按图执行（Agent、MCP 工具、条件分支等）。跨节点传参优先用 `{{outputs.变量名}}`。详见 [图编排使用说明](docs/zh-CN/workflow-graph.md)。
 - **工具监控**：查看任务队列、执行日志、大文件附件。
 - **会话历史**：所有对话与工具调用保存在 SQLite，可随时重放。
 - **对话分组**：将对话按项目或主题组织到不同分组，支持置顶、重命名、删除等操作，所有数据持久化存储。
@@ -263,7 +274,7 @@ go build -o cyberstrike-ai cmd/server/main.go
 - **WebShell 管理**：添加并管理 WebShell 连接（PHP/ASP/ASPX/JSP 或自定义类型）。使用虚拟终端执行命令（带命令历史与快捷命令），使用文件管理浏览、读取、编辑、上传与删除目标文件，并支持按路径导航和名称过滤。连接信息持久化存储于 SQLite，支持 GET/POST 及可配置命令参数（兼容冰蝎/蚁剑等）。
 - **内置 C2**：在 Web 界面或 `/api/c2/*` 创建/启动 **监听器**、生成 **Payload**、查看 **会话**、下发 **任务** 并订阅 **事件（SSE）**。智能体与外部客户端通过 **C2 MCP 工具族**（含 **`c2_task`** 等）编排；开启人机协同时，高风险任务可走审批。**仅用于已获明确授权的目标。**
 - **可视化配置**：在界面中切换模型、启停工具、设置迭代次数等。
-- **人机协同（HITL）**：侧栏设置协同模式与免审批工具（逗号或换行）；全局白名单见 `config.yaml` 的 `hitl.tool_whitelist`。点「**应用**」可写浏览器/服务端并合并新增工具进配置（**无需重启**）。**新对话**保留侧栏选择；导航 **人机协同** 处理待审批。从侧栏删掉工具不会自动从配置文件移除全局项，需手改 `config.yaml`。
+- **人机协同（HITL）**：侧栏设置协同模式与免审批工具（逗号或换行）；全局白名单见 `config.yaml` 的 `hitl.tool_whitelist`。审计 Agent 可通过 `hitl.audit_model` 单独配置低成本模型，适合人工审计压力较大时接管常规审批。点「**应用**」可写浏览器/服务端并合并新增工具进配置（**无需重启**）。**新对话**保留侧栏选择；导航 **人机协同** 处理待审批。从侧栏删掉工具不会自动从配置文件移除全局项，需手改 `config.yaml`。
 
 ### 默认安全措施
 - 设置面板内置必填校验，防止漏配 API Key/Base URL/模型。
@@ -297,16 +308,16 @@ go build -o cyberstrike-ai cmd/server/main.go
 2. 重启服务或重新加载配置，角色会出现在角色选择下拉菜单中。
 
 ### 多代理模式（Eino：Deep / Plan-Execute / Supervisor）
-- **能力说明**：在 **Eino 单代理**（`/api/eino-agent*`）之外，多代理基于 CloudWeGo **Eino** `adk/prebuilt`：**`deep`**、**`plan_execute`**、**`supervisor`**；客户端 **`orchestration`** 选择（缺省 `deep`）。
+- **能力说明**：在 **Eino 单代理**（`/api/eino-agent*`）之外，多代理基于 CloudWeGo **Eino** `adk/prebuilt`：**`deep`**、**`plan_execute`**、**`supervisor`**；客户端 **`orchestration`** 选择（缺省 `deep`）。模式定位按 Eino ADK 最佳实践区分：**Deep** 适合复杂安全测试与 task 子代理协作；**Plan-Execute** 适合目标明确的规划 → 执行 → 重规划闭环；**Supervisor** 适合多个专业子代理动态分派的专家路由场景。
 - **Markdown 定义**（`agents_dir`，默认 `agents/`）：
   - **Deep 主代理**：`orchestrator.md` 或唯一 `kind: orchestrator` 的 `.md`；正文或 `multi_agent.orchestrator_instruction`，再回退 Eino 默认。
   - **Plan-Execute 主代理**：固定 **`orchestrator-plan-execute.md`**（另可配 `orchestrator_instruction_plan_execute`）。
-  - **Supervisor 主代理**：固定 **`orchestrator-supervisor.md`**（另可配 `orchestrator_instruction_supervisor`）；至少需一名子代理。
+  - **Supervisor 主代理**：固定 **`orchestrator-supervisor.md`**（另可配 `orchestrator_instruction_supervisor`）；至少需一名子代理，只有一名子代理时会提示专家路由价值有限。
   - **子代理**（**deep** / **supervisor**）：其余 `*.md`；标成 orchestrator 的不会进入 `task` 列表。
 - **界面管理**：**Agents → Agent 管理**；API `/api/multi-agent/markdown-agents`。
 - **配置项**：`multi_agent`：`enabled`、`robot_default_agent_mode`、`batch_use_multi_agent`、`max_iteration`、`plan_execute_loop_max_iterations`、各模式 orchestrator 指令字段、可选 YAML `sub_agents` 与目录合并（同 `id` → Markdown 优先）、**`eino_skills`**、**`eino_middleware`**。
 - **长任务与恢复**：`checkpoint_dir` 支持进程崩溃后 ADK **断点续跑**（与基于 trace 的「中断继续」不同）。`deep_model_retry_max_retries` 在同一次 LLM 调用内重试瞬时 API 失败。**Summarization** 触发压缩时会写入过滤后的 **transcript**，摘要消息中带路径，模型可用 `read_file` 找回扫描输出等压缩前细节。
-- **更多细节**：[docs/MULTI_AGENT_EINO.md](docs/MULTI_AGENT_EINO.md)（流式、机器人、批量、中间件差异）。
+- **更多细节**：[docs/zh-CN/MULTI_AGENT_EINO.md](docs/zh-CN/MULTI_AGENT_EINO.md)（流式、机器人、批量、中间件差异）。
 
 ### Skills 技能系统（Agent Skills + Eino）
 - **目录规范**：与 [Agent Skills](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview) 一致，**仅**需目录下的 **`SKILL.md`**：YAML 头只用官方的 **`name` 与 `description`**，正文为 Markdown。可选同目录其他文件（`FORMS.md`、`REFERENCE.md`、`scripts/*` 等）。**不使用 `SKILL.yaml`**（Claude / Eino 官方均无此文件）；章节、`scripts/` 列表、渐进式行为由运行时从正文与磁盘 **自动推导**。
@@ -327,7 +338,7 @@ go build -o cyberstrike-ai cmd/server/main.go
 - **结果压缩/摘要**：多兆字节日志可先压缩或生成摘要再写入 SQLite，减小档案体积。
 
 **自定义工具的一般步骤**
-1. 复制 `tools/` 下现有示例（如 `tools/sample.yaml`）。
+1. 复制 `tools/` 下现有示例（如 `tools/nmap.yaml` 或 `tools/ffuf.yaml`）。
 2. 修改 `name`、`command`、`args`、`short_description` 等基础信息。
 3. 在 `parameters[]` 中声明位置参数或带 flag 的参数，方便智能体自动拼装命令。
 4. 视需要补充 `description` 或 `notes`，给 AI 额外上下文或结果解读提示。
@@ -629,9 +640,18 @@ enabled: true
 
 ## 相关文档
 
-- [多代理模式（Eino）](docs/MULTI_AGENT_EINO.md)：**Deep**、**Plan-Execute**、**Supervisor**、`agents/*.md`、`eino_skills` / `eino_middleware`、接口与流式说明。
-- [图编排使用说明](docs/workflow-graph.md)：可视化流程搭建、节点配置、`previous` / `outputs` 变量传参与角色绑定。
-- [机器人使用说明（钉钉 / 飞书）](docs/robot.md)：在手机端通过钉钉、飞书与 CyberStrikeAI 对话的完整配置步骤、命令与排查说明，**建议按该文档操作以避免走弯路**。
+- [文档导航](docs/README.md)：部署、配置、安全模型、API、知识库、C2、WebShell、MCP、开发、测试、排错等完整专题入口。
+- [部署指南](docs/zh-CN/deployment.md)：源码/二进制运行、HTTPS、反向代理、systemd、备份、升级与回滚。
+- [运维 Runbooks](docs/zh-CN/runbooks.md)：生产部署、外部 MCP、知识库、授权 Web 测试、C2 清理等可执行流程。
+- [安全加固指南](docs/zh-CN/security-hardening.md)：上线前基线、HITL 白名单、反向代理、文件权限和周期巡检。
+- [API Recipes](docs/zh-CN/api-recipes.md)：登录、Agent、流式、多代理、上传、漏洞、知识库和审计导出调用示例。
+- [配置参考](docs/zh-CN/configuration.md)：`config.yaml` 各配置段、推荐值和修改建议。
+- [安全模型](docs/zh-CN/security-model.md)：认证、工具执行、HITL、审计、C2/WebShell 和数据安全边界。
+- [API 参考](docs/zh-CN/api-reference.md)：OpenAPI、认证、Agent、项目、知识库、C2、WebShell 等接口入口。
+- [多代理模式（Eino）](docs/zh-CN/MULTI_AGENT_EINO.md)：**Deep**、**Plan-Execute**、**Supervisor**、`agents/*.md`、`eino_skills` / `eino_middleware`、接口与流式说明。
+- [图编排使用说明](docs/zh-CN/workflow-graph.md)：可视化流程搭建、节点配置、`previous` / `outputs` 变量传参与角色绑定。
+- [机器人使用说明](docs/zh-CN/robot.md)：个人微信、企业微信、钉钉、飞书、Telegram、Slack、Discord、QQ 机器人的配置、命令与排查。
+- [人机协同最佳实践](docs/zh-CN/hitl-best-practices.md)：审批方模式、白名单、审计 Agent 提示词策略与独立小模型配置。
 
 ## 项目结构
 
@@ -644,7 +664,7 @@ CyberStrikeAI/
 ├── roles/               # 角色配置文件目录（含 12+ 预设安全测试角色）
 ├── skills/              # Agent Skills 目录（SKILL.md + 可选文件；示例 cyberstrike-eino-demo）
 ├── agents/              # 多代理 Markdown（orchestrator.md + 子代理 *.md）
-├── docs/                # 说明文档（如机器人使用说明、MULTI_AGENT_EINO.md）
+├── docs/                # 专题文档（部署、配置、安全、API、知识库、C2、WebShell 等）
 ├── images/              # 文档配图
 ├── config.yaml          # 运行配置
 ├── run.sh               # 启动脚本
@@ -705,6 +725,8 @@ CyberStrikeAI 是一个专业的安全测试平台，旨在帮助安全研究人
 - 不会将本工具用于任何非法或恶意目的
 
 **开发者不对任何滥用行为负责！** 请确保您的使用符合当地法律法规，并获得目标系统所有者的明确授权。
+
+安全问题报告与部署加固建议见 [SECURITY.md](SECURITY.md)。
 
 ---
 

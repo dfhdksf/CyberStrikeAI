@@ -71,6 +71,162 @@
         return key;
     }
 
+    const c2FormSelectMap = {};
+    let c2FormSelectDocBound = false;
+    const C2_FORM_SELECT_CARET = '<svg class="c2-form-select-caret" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    const C2_FORM_SELECT_HANDLERS = {
+        'c2-listener-type': function () {
+            C2.syncListenerProfileRowForType();
+        }
+    };
+
+    function closeAllC2FormSelects() {
+        Object.keys(c2FormSelectMap).forEach(function (id) {
+            const reg = c2FormSelectMap[id];
+            if (!reg || !reg.wrapper) return;
+            reg.wrapper.classList.remove('open');
+            if (reg.trigger) reg.trigger.setAttribute('aria-expanded', 'false');
+        });
+    }
+
+    function syncC2FormSelect(selectId) {
+        const reg = c2FormSelectMap[selectId];
+        if (!reg) return;
+        const select = reg.select;
+        const dropdown = reg.dropdown;
+        const trigger = reg.trigger;
+        const valueSpan = trigger.querySelector('.c2-form-select-value');
+
+        dropdown.innerHTML = '';
+        Array.prototype.forEach.call(select.options, function (opt) {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'c2-form-select-option';
+            item.setAttribute('role', 'option');
+            item.setAttribute('data-value', opt.value);
+            if (opt.value === select.value) {
+                item.classList.add('is-selected');
+                item.setAttribute('aria-selected', 'true');
+            } else {
+                item.setAttribute('aria-selected', 'false');
+            }
+            const check = document.createElement('span');
+            check.className = 'c2-form-select-check';
+            check.setAttribute('aria-hidden', 'true');
+            check.textContent = '✓';
+            const label = document.createElement('span');
+            label.className = 'c2-form-select-label';
+            label.textContent = opt.textContent;
+            item.appendChild(check);
+            item.appendChild(label);
+            dropdown.appendChild(item);
+        });
+
+        const selectedOpt = select.options[select.selectedIndex];
+        if (valueSpan) {
+            valueSpan.textContent = selectedOpt ? selectedOpt.textContent : '';
+        }
+        trigger.disabled = !!select.disabled;
+        reg.wrapper.classList.toggle('is-disabled', !!select.disabled);
+    }
+
+    function enhanceC2FormSelect(select) {
+        if (!select || !select.id) return;
+        const existing = c2FormSelectMap[select.id];
+        if (existing && existing.select !== select) {
+            delete c2FormSelectMap[select.id];
+        }
+        if (select.dataset.c2FormCustom === '1') {
+            syncC2FormSelect(select.id);
+            return;
+        }
+        select.dataset.c2FormCustom = '1';
+        select.classList.add('c2-form-native-select');
+        select.tabIndex = -1;
+        select.setAttribute('aria-hidden', 'true');
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'c2-form-select-ui';
+
+        const trigger = document.createElement('button');
+        trigger.type = 'button';
+        trigger.className = 'c2-form-select-trigger';
+        trigger.setAttribute('aria-haspopup', 'listbox');
+        trigger.setAttribute('aria-expanded', 'false');
+        const valueSpan = document.createElement('span');
+        valueSpan.className = 'c2-form-select-value';
+        trigger.appendChild(valueSpan);
+        trigger.insertAdjacentHTML('beforeend', C2_FORM_SELECT_CARET);
+
+        const dropdown = document.createElement('div');
+        dropdown.className = 'c2-form-select-dropdown';
+        dropdown.setAttribute('role', 'listbox');
+
+        const parent = select.parentNode;
+        parent.insertBefore(wrapper, select);
+        wrapper.appendChild(trigger);
+        wrapper.appendChild(dropdown);
+        wrapper.appendChild(select);
+
+        c2FormSelectMap[select.id] = { wrapper: wrapper, trigger: trigger, dropdown: dropdown, select: select };
+
+        trigger.addEventListener('click', function (e) {
+            e.stopPropagation();
+            if (select.disabled) return;
+            const open = wrapper.classList.contains('open');
+            closeAllC2FormSelects();
+            if (!open) {
+                wrapper.classList.add('open');
+                trigger.setAttribute('aria-expanded', 'true');
+            }
+        });
+
+        dropdown.addEventListener('click', function (e) {
+            const opt = e.target.closest('.c2-form-select-option');
+            if (!opt) return;
+            e.stopPropagation();
+            const val = opt.getAttribute('data-value');
+            if (val === null) return;
+            if (select.value !== val) {
+                select.value = val;
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            wrapper.classList.remove('open');
+            trigger.setAttribute('aria-expanded', 'false');
+            syncC2FormSelect(select.id);
+        });
+
+        select.addEventListener('change', function () {
+            syncC2FormSelect(select.id);
+        });
+
+        if (!select.dataset.c2FormFilterBound) {
+            select.dataset.c2FormFilterBound = '1';
+            const handler = C2_FORM_SELECT_HANDLERS[select.id];
+            if (typeof handler === 'function') {
+                select.addEventListener('change', handler);
+            }
+        }
+
+        syncC2FormSelect(select.id);
+    }
+
+    C2.refreshFormSelects = function (root) {
+        const container = root || document.getElementById('c2-modal-content');
+        if (!container) return;
+        Object.keys(c2FormSelectMap).forEach(function (id) {
+            if (!document.getElementById(id)) delete c2FormSelectMap[id];
+        });
+        container.querySelectorAll('select.c2-form-select-native').forEach(enhanceC2FormSelect);
+        if (!c2FormSelectDocBound) {
+            c2FormSelectDocBound = true;
+            document.addEventListener('click', closeAllC2FormSelects);
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') closeAllC2FormSelects();
+            });
+        }
+    };
+
     function listenerTypeLabel(type) {
         if (!type) return '';
         const k = 'c2.listeners.typeLabels.' + String(type).toLowerCase();
@@ -609,7 +765,7 @@
                     </div>
                     <div class="c2-form-group">
                         <label>${escapeHtml(c2t('c2.listeners.type'))}</label>
-                        <select id="c2-listener-type" class="form-control c2-native-select" onchange="C2.syncListenerProfileRowForType()">
+                        <select id="c2-listener-type" class="form-control c2-form-select-native">
                             <option value="http_beacon">HTTP Beacon</option>
                             <option value="https_beacon">HTTPS Beacon</option>
                             <option value="tcp_reverse">TCP Reverse</option>
@@ -631,7 +787,7 @@
                 <div class="c2-form-group" id="c2-listener-profile-group">
                     <label>${escapeHtml(c2t('c2.listeners.malleableProfile'))}</label>
                     ${emptyProfHintCreate}
-                    <select id="c2-listener-profile-id" class="form-control c2-native-select">${profileOpts}</select>
+                    <select id="c2-listener-profile-id" class="form-control c2-form-select-native">${profileOpts}</select>
                     <div class="form-hint">${escapeHtml(c2t('c2.listeners.malleableProfileHint'))}</div>
                 </div>
                 <div class="c2-form-group">
@@ -657,6 +813,7 @@
             </div>
         `;
             C2.syncListenerProfileRowForType();
+            C2.refreshFormSelects(content);
         }).catch(() => {
             showToast(c2t('c2.listeners.toastProfilesLoadFailed'), 'error');
             C2.closeModal();
@@ -681,6 +838,8 @@
         if (legacyRow) {
             legacyRow.style.display = t === 'tcp_reverse' ? '' : 'none';
         }
+        syncC2FormSelect('c2-listener-type');
+        syncC2FormSelect('c2-listener-profile-id');
     };
 
     C2.createListener = function() {
@@ -801,7 +960,7 @@
                 <div class="c2-form-group" id="c2-listener-profile-group">
                     <label>${escapeHtml(c2t('c2.listeners.malleableProfile'))}</label>
                     ${httpHint}${emptyProfHint}
-                    <select id="c2-listener-profile-id" class="form-control c2-native-select">${profileOpts}</select>
+                    <select id="c2-listener-profile-id" class="form-control c2-form-select-native">${profileOpts}</select>
                     <div class="form-hint">${escapeHtml(c2t('c2.listeners.malleableProfileHint'))}</div>
                 </div>
                 <div class="c2-form-group">
@@ -827,6 +986,7 @@
                 <button class="btn-primary" onclick="C2.saveListener('${l.id}')">${escapeHtml(c2t('common.save'))}</button>
             </div>
         `;
+            C2.refreshFormSelects(content);
         }).catch(() => {
             showToast(c2t('c2.listeners.toastProfilesLoadFailed'), 'error');
             C2.closeModal();
@@ -3580,6 +3740,7 @@
     };
 
     C2.closeModal = function() {
+        closeAllC2FormSelects();
         const modal = document.getElementById('c2-modal');
         if (modal) {
             const modalBox = modal.querySelector('.c2-modal');
@@ -3619,6 +3780,9 @@
             if (!window.currentPageId || !String(window.currentPageId).startsWith('c2')) return;
             if (typeof applyTranslations === 'function') applyTranslations(document);
             C2.init();
+            if (isAppModalOpen('c2-modal')) {
+                C2.refreshFormSelects();
+            }
             if (C2.selectedSessionId && (window.currentPageId === 'c2-sessions')) {
                 C2.renderSessions();
                 C2.renderSessionDetail(C2.selectedSessionId);
