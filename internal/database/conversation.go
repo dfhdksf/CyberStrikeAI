@@ -1144,6 +1144,12 @@ ORDER BY created_at ASC, rowid ASC`, assistantMessageID)
 
 // AddProcessDetail 添加过程详情事件
 func (db *DB) AddProcessDetail(messageID, conversationID, eventType, message string, data interface{}) error {
+	_, err := db.AddProcessDetailWithID(messageID, conversationID, eventType, message, data)
+	return err
+}
+
+// AddProcessDetailWithID 添加过程详情事件并返回记录 ID。
+func (db *DB) AddProcessDetailWithID(messageID, conversationID, eventType, message string, data interface{}) (string, error) {
 	id := uuid.New().String()
 
 	var dataJSON string
@@ -1161,10 +1167,10 @@ func (db *DB) AddProcessDetail(messageID, conversationID, eventType, message str
 		id, messageID, conversationID, eventType, message, dataJSON, time.Now(),
 	)
 	if err != nil {
-		return fmt.Errorf("添加过程详情失败: %w", err)
+		return "", fmt.Errorf("添加过程详情失败: %w", err)
 	}
 
-	return nil
+	return id, nil
 }
 
 // GetProcessDetails 获取消息的过程详情
@@ -1201,6 +1207,29 @@ func (db *DB) GetProcessDetails(messageID string) ([]ProcessDetail, error) {
 	}
 
 	return details, nil
+}
+
+// GetProcessDetailByID 获取单条过程详情。
+func (db *DB) GetProcessDetailByID(id string) (*ProcessDetail, error) {
+	var detail ProcessDetail
+	var createdAt string
+	err := db.QueryRow(
+		"SELECT id, message_id, conversation_id, event_type, message, data, created_at FROM process_details WHERE id = ?",
+		id,
+	).Scan(&detail.ID, &detail.MessageID, &detail.ConversationID, &detail.EventType, &detail.Message, &detail.Data, &createdAt)
+	if err != nil {
+		return nil, fmt.Errorf("查询过程详情失败: %w", err)
+	}
+
+	var parseErr error
+	detail.CreatedAt, parseErr = time.Parse("2006-01-02 15:04:05.999999999-07:00", createdAt)
+	if parseErr != nil {
+		detail.CreatedAt, parseErr = time.Parse("2006-01-02 15:04:05", createdAt)
+	}
+	if parseErr != nil {
+		detail.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	}
+	return &detail, nil
 }
 
 // ProcessDetailsSummary 过程详情摘要（用于折叠态展示，避免全量加载）。
