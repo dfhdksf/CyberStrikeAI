@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -40,6 +41,20 @@ type Config struct {
 	Project     ProjectConfig         `yaml:"project,omitempty" json:"project,omitempty"`
 	Vision      VisionConfig          `yaml:"vision,omitempty" json:"vision,omitempty"`
 }
+
+type EnsureLocalConfigResult struct {
+	Created           bool
+	GeneratedPassword string
+	ExamplePath       string
+}
+
+const (
+	DefaultSummarizationUserIntentLedgerMaxRunes      = 96000
+	DefaultSummarizationUserIntentLedgerEntryMaxRunes = 16000
+	DefaultLatestUserMessageMaxRunes                  = 48000
+	DefaultLatestUserMessageHeadRunes                 = 24000
+	DefaultLatestUserMessageTailRunes                 = 24000
+)
 
 // ProjectConfig 项目黑板（跨对话共享事实）配置。
 type ProjectConfig struct {
@@ -255,6 +270,16 @@ type MultiAgentEinoMiddlewareConfig struct {
 	SummarizationTriggerRatio float64 `yaml:"summarization_trigger_ratio,omitempty" json:"summarization_trigger_ratio,omitempty"`
 	// SummarizationEmitInternalEvents controls middleware internal event emission (default true).
 	SummarizationEmitInternalEvents *bool `yaml:"summarization_emit_internal_events,omitempty" json:"summarization_emit_internal_events,omitempty"`
+	// SummarizationUserIntentLedgerMaxRunes caps the DB-backed immutable user input ledger injected into model context.
+	SummarizationUserIntentLedgerMaxRunes int `yaml:"summarization_user_intent_ledger_max_runes,omitempty" json:"summarization_user_intent_ledger_max_runes,omitempty"`
+	// SummarizationUserIntentLedgerEntryMaxRunes caps each user message entry inside the immutable user input ledger.
+	SummarizationUserIntentLedgerEntryMaxRunes int `yaml:"summarization_user_intent_ledger_entry_max_runes,omitempty" json:"summarization_user_intent_ledger_entry_max_runes,omitempty"`
+	// LatestUserMessageMaxRunes caps the current user turn inserted into model context; full text is persisted as an artifact when capped.
+	LatestUserMessageMaxRunes int `yaml:"latest_user_message_max_runes,omitempty" json:"latest_user_message_max_runes,omitempty"`
+	// LatestUserMessageHeadRunes keeps the head preview for an oversized current user turn.
+	LatestUserMessageHeadRunes int `yaml:"latest_user_message_head_runes,omitempty" json:"latest_user_message_head_runes,omitempty"`
+	// LatestUserMessageTailRunes keeps the tail preview for an oversized current user turn.
+	LatestUserMessageTailRunes int `yaml:"latest_user_message_tail_runes,omitempty" json:"latest_user_message_tail_runes,omitempty"`
 	// SummarizationRetryMaxAttempts 已废弃：summarization 与 run loop 共用 run_retry_max_attempts 及 isEinoTransientRunError。
 	SummarizationRetryMaxAttempts int `yaml:"summarization_retry_max_attempts,omitempty" json:"summarization_retry_max_attempts,omitempty"`
 	// PlanExecuteUserInputBudgetRatio caps planner/replanner/executor userInput prompt budget ratio (default 0.35).
@@ -300,6 +325,41 @@ func (c MultiAgentEinoMiddlewareConfig) SummarizationEmitInternalEventsEffective
 		return *c.SummarizationEmitInternalEvents
 	}
 	return true
+}
+
+func (c MultiAgentEinoMiddlewareConfig) SummarizationUserIntentLedgerMaxRunesEffective() int {
+	if c.SummarizationUserIntentLedgerMaxRunes > 0 {
+		return c.SummarizationUserIntentLedgerMaxRunes
+	}
+	return DefaultSummarizationUserIntentLedgerMaxRunes
+}
+
+func (c MultiAgentEinoMiddlewareConfig) SummarizationUserIntentLedgerEntryMaxRunesEffective() int {
+	if c.SummarizationUserIntentLedgerEntryMaxRunes > 0 {
+		return c.SummarizationUserIntentLedgerEntryMaxRunes
+	}
+	return DefaultSummarizationUserIntentLedgerEntryMaxRunes
+}
+
+func (c MultiAgentEinoMiddlewareConfig) LatestUserMessageMaxRunesEffective() int {
+	if c.LatestUserMessageMaxRunes > 0 {
+		return c.LatestUserMessageMaxRunes
+	}
+	return DefaultLatestUserMessageMaxRunes
+}
+
+func (c MultiAgentEinoMiddlewareConfig) LatestUserMessageHeadRunesEffective() int {
+	if c.LatestUserMessageHeadRunes > 0 {
+		return c.LatestUserMessageHeadRunes
+	}
+	return DefaultLatestUserMessageHeadRunes
+}
+
+func (c MultiAgentEinoMiddlewareConfig) LatestUserMessageTailRunesEffective() int {
+	if c.LatestUserMessageTailRunes > 0 {
+		return c.LatestUserMessageTailRunes
+	}
+	return DefaultLatestUserMessageTailRunes
 }
 
 func (c MultiAgentEinoMiddlewareConfig) PlanExecuteUserInputBudgetRatioEffective() float64 {
@@ -398,14 +458,19 @@ type MultiAgentSubConfig struct {
 
 // MultiAgentPublic 返回给前端的精简信息（不含子代理指令全文）。
 type MultiAgentPublic struct {
-	Enabled                               bool     `json:"enabled"`
-	RobotDefaultAgentMode                 string   `json:"robot_default_agent_mode,omitempty"`
-	BatchUseMultiAgent                    bool     `json:"batch_use_multi_agent"`
-	SubAgentCount                         int      `json:"sub_agent_count"`
-	Orchestration                         string   `json:"orchestration,omitempty"`
-	PlanExecuteLoopMaxIterations          int      `json:"plan_execute_loop_max_iterations"`
-	ToolSearchAlwaysVisibleTools          []string `json:"tool_search_always_visible_tools,omitempty"`
-	ToolSearchAlwaysVisibleEffectiveTools []string `json:"tool_search_always_visible_effective_tools,omitempty"`
+	Enabled                                    bool     `json:"enabled"`
+	RobotDefaultAgentMode                      string   `json:"robot_default_agent_mode,omitempty"`
+	BatchUseMultiAgent                         bool     `json:"batch_use_multi_agent"`
+	SubAgentCount                              int      `json:"sub_agent_count"`
+	Orchestration                              string   `json:"orchestration,omitempty"`
+	PlanExecuteLoopMaxIterations               int      `json:"plan_execute_loop_max_iterations"`
+	SummarizationUserIntentLedgerMaxRunes      int      `json:"summarization_user_intent_ledger_max_runes"`
+	SummarizationUserIntentLedgerEntryMaxRunes int      `json:"summarization_user_intent_ledger_entry_max_runes"`
+	LatestUserMessageMaxRunes                  int      `json:"latest_user_message_max_runes"`
+	LatestUserMessageHeadRunes                 int      `json:"latest_user_message_head_runes"`
+	LatestUserMessageTailRunes                 int      `json:"latest_user_message_tail_runes"`
+	ToolSearchAlwaysVisibleTools               []string `json:"tool_search_always_visible_tools,omitempty"`
+	ToolSearchAlwaysVisibleEffectiveTools      []string `json:"tool_search_always_visible_effective_tools,omitempty"`
 }
 
 // NormalizeAgentMode 解析代理模式（eino_single | deep | plan_execute | supervisor）；空值默认 eino_single。
@@ -445,10 +510,15 @@ func NormalizeMultiAgentOrchestration(s string) string {
 
 // MultiAgentAPIUpdate 设置页/API 仅更新多代理标量字段；写入 YAML 时不覆盖 sub_agents 等块。
 type MultiAgentAPIUpdate struct {
-	Enabled                      bool   `json:"enabled"`
-	RobotDefaultAgentMode        string `json:"robot_default_agent_mode,omitempty"`
-	BatchUseMultiAgent           bool   `json:"batch_use_multi_agent"`
-	PlanExecuteLoopMaxIterations *int   `json:"plan_execute_loop_max_iterations,omitempty"`
+	Enabled                                    bool   `json:"enabled"`
+	RobotDefaultAgentMode                      string `json:"robot_default_agent_mode,omitempty"`
+	BatchUseMultiAgent                         bool   `json:"batch_use_multi_agent"`
+	PlanExecuteLoopMaxIterations               *int   `json:"plan_execute_loop_max_iterations,omitempty"`
+	SummarizationUserIntentLedgerMaxRunes      *int   `json:"summarization_user_intent_ledger_max_runes,omitempty"`
+	SummarizationUserIntentLedgerEntryMaxRunes *int   `json:"summarization_user_intent_ledger_entry_max_runes,omitempty"`
+	LatestUserMessageMaxRunes                  *int   `json:"latest_user_message_max_runes,omitempty"`
+	LatestUserMessageHeadRunes                 *int   `json:"latest_user_message_head_runes,omitempty"`
+	LatestUserMessageTailRunes                 *int   `json:"latest_user_message_tail_runes,omitempty"`
 	// 指针区分「JSON 未传该字段」与「传空数组要清空」；省略时不应覆盖 YAML 中的常驻工具白名单。
 	ToolSearchAlwaysVisibleTools *[]string `json:"tool_search_always_visible_tools,omitempty"`
 }
@@ -1038,6 +1108,64 @@ func Load(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+func EnsureLocalConfig(path string) (EnsureLocalConfigResult, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		path = "config.yaml"
+	}
+
+	if _, err := os.Stat(path); err == nil {
+		return EnsureLocalConfigResult{}, nil
+	} else if err != nil && !os.IsNotExist(err) {
+		return EnsureLocalConfigResult{}, fmt.Errorf("检查配置文件失败: %w", err)
+	}
+
+	examplePath := filepath.Join(filepath.Dir(path), "config.example.yaml")
+	if _, err := os.Stat(examplePath); err != nil {
+		if os.IsNotExist(err) {
+			if alt := "config.example.yaml"; examplePath != alt {
+				if _, altErr := os.Stat(alt); altErr == nil {
+					examplePath = alt
+				} else {
+					return EnsureLocalConfigResult{}, fmt.Errorf("配置文件 %s 不存在，且未找到模板 %s", path, examplePath)
+				}
+			} else {
+				return EnsureLocalConfigResult{}, fmt.Errorf("配置文件 %s 不存在，且未找到模板 %s", path, examplePath)
+			}
+		} else {
+			return EnsureLocalConfigResult{}, fmt.Errorf("检查配置模板失败: %w", err)
+		}
+	}
+
+	data, err := os.ReadFile(examplePath)
+	if err != nil {
+		return EnsureLocalConfigResult{}, fmt.Errorf("读取配置模板失败: %w", err)
+	}
+
+	if dir := filepath.Dir(path); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return EnsureLocalConfigResult{}, fmt.Errorf("创建配置目录失败: %w", err)
+		}
+	}
+	if err := os.WriteFile(path, data, fs.FileMode(0600)); err != nil {
+		return EnsureLocalConfigResult{}, fmt.Errorf("创建配置文件失败: %w", err)
+	}
+
+	password, err := generateStrongPassword(24)
+	if err != nil {
+		return EnsureLocalConfigResult{}, fmt.Errorf("生成默认密码失败: %w", err)
+	}
+	if err := PersistAuthPassword(path, password); err != nil {
+		return EnsureLocalConfigResult{}, fmt.Errorf("写入默认密码失败: %w", err)
+	}
+
+	return EnsureLocalConfigResult{
+		Created:           true,
+		GeneratedPassword: password,
+		ExamplePath:       examplePath,
+	}, nil
 }
 
 func generateStrongPassword(length int) (string, error) {

@@ -1144,6 +1144,12 @@ ORDER BY created_at ASC, rowid ASC`, assistantMessageID)
 
 // AddProcessDetail 添加过程详情事件
 func (db *DB) AddProcessDetail(messageID, conversationID, eventType, message string, data interface{}) error {
+	_, err := db.AddProcessDetailWithID(messageID, conversationID, eventType, message, data)
+	return err
+}
+
+// AddProcessDetailWithID 添加过程详情事件并返回记录 ID。
+func (db *DB) AddProcessDetailWithID(messageID, conversationID, eventType, message string, data interface{}) (string, error) {
 	id := uuid.New().String()
 
 	var dataJSON string
@@ -1161,10 +1167,10 @@ func (db *DB) AddProcessDetail(messageID, conversationID, eventType, message str
 		id, messageID, conversationID, eventType, message, dataJSON, time.Now(),
 	)
 	if err != nil {
-		return fmt.Errorf("添加过程详情失败: %w", err)
+		return "", fmt.Errorf("添加过程详情失败: %w", err)
 	}
 
-	return nil
+	return id, nil
 }
 
 // GetProcessDetails 获取消息的过程详情
@@ -1203,11 +1209,45 @@ func (db *DB) GetProcessDetails(messageID string) ([]ProcessDetail, error) {
 	return details, nil
 }
 
+// GetProcessDetailByID 获取单条过程详情。
+func (db *DB) GetProcessDetailByID(id string) (*ProcessDetail, error) {
+	var detail ProcessDetail
+	var createdAt string
+	err := db.QueryRow(
+		"SELECT id, message_id, conversation_id, event_type, message, data, created_at FROM process_details WHERE id = ?",
+		id,
+	).Scan(&detail.ID, &detail.MessageID, &detail.ConversationID, &detail.EventType, &detail.Message, &detail.Data, &createdAt)
+	if err != nil {
+		return nil, fmt.Errorf("查询过程详情失败: %w", err)
+	}
+
+	var parseErr error
+	detail.CreatedAt, parseErr = time.Parse("2006-01-02 15:04:05.999999999-07:00", createdAt)
+	if parseErr != nil {
+		detail.CreatedAt, parseErr = time.Parse("2006-01-02 15:04:05", createdAt)
+	}
+	if parseErr != nil {
+		detail.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	}
+	return &detail, nil
+}
+
 // ProcessDetailsSummary 过程详情摘要（用于折叠态展示，避免全量加载）。
 type ProcessDetailsSummary struct {
-	Total          int `json:"total"`
-	IterationCount int `json:"iterationCount"`
-	MaxIteration   int `json:"maxIteration"`
+	Total           int                           `json:"total"`
+	IterationCount  int                           `json:"iterationCount"`
+	MaxIteration    int                           `json:"maxIteration"`
+	ToolCount       int                           `json:"toolCount"`
+	ToolExecutions  []ProcessDetailsToolExecution `json:"toolExecutions,omitempty"`
+	MCPExecutionIDs []string                      `json:"mcpExecutionIds,omitempty"`
+}
+
+type ProcessDetailsToolExecution struct {
+	ProcessDetailID string `json:"processDetailId,omitempty"`
+	ToolName        string `json:"toolName,omitempty"`
+	ToolCallID      string `json:"toolCallId,omitempty"`
+	ExecutionID     string `json:"executionId,omitempty"`
+	Status          string `json:"status,omitempty"`
 }
 
 // GetProcessDetailsSummary 统计消息的过程详情数量与迭代轮次。
@@ -1224,6 +1264,110 @@ func (db *DB) GetProcessDetailsSummary(messageID string) (*ProcessDetailsSummary
 	if total == 0 {
 		return summary, nil
 	}
+
+	if err := db.QueryRow(
+		"SELECT COUNT(*) FROM process_details WHERE message_id = ? AND event_type = 'tool_call'",
+		messageID,
+	).Scan(&summary.ToolCount); err != nil {
+		return nil, fmt.Errorf("统计工具调用详情失败: %w", err)
+	}
+
+	execRows, err := db.Query(
+		"SELECT id, event_type, data FROM process_details WHERE message_id = ? AND event_type IN ('tool_call', 'tool_result') ORDER BY created_at ASC, rowid ASC",
+		messageID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("查询工具执行摘要失败: %w", err)
+	}
+	seenExecIDs := make(map[string]bool)
+	toolIndexByCallID := make(map[string]int)
+	unmatchedToolIdx := 0
+	for execRows.Next() {
+		var detailID string
+		var eventType string
+		var dataJSON string
+		if err := execRows.Scan(&detailID, &eventType, &dataJSON); err != nil {
+			execRows.Close()
+			return nil, fmt.Errorf("扫描工具执行摘要失败: %w", err)
+		}
+		if dataJSON == "" {
+			continue
+		}
+		var payload map[string]interface{}
+		if err := json.Unmarshal([]byte(dataJSON), &payload); err != nil {
+			continue
+		}
+		toolName, _ := payload["toolName"].(string)
+		toolName = strings.TrimSpace(toolName)
+		toolCallID, _ := payload["toolCallId"].(string)
+		toolCallID = strings.TrimSpace(toolCallID)
+		execID, _ := payload["executionId"].(string)
+		execID = strings.TrimSpace(execID)
+		status := ""
+		if eventType == "tool_result" {
+			if success, ok := payload["success"].(bool); ok {
+				if success {
+					status = "completed"
+				} else {
+					status = "failed"
+				}
+			} else if isErr, ok := payload["isError"].(bool); ok && isErr {
+				status = "failed"
+			}
+		}
+		if eventType == "tool_call" {
+			summary.ToolExecutions = append(summary.ToolExecutions, ProcessDetailsToolExecution{
+				ProcessDetailID: strings.TrimSpace(detailID),
+				ToolName:        toolName,
+				ToolCallID:      toolCallID,
+				Status:          "running",
+			})
+			if toolCallID != "" {
+				toolIndexByCallID[toolCallID] = len(summary.ToolExecutions) - 1
+			}
+		}
+		if eventType == "tool_result" {
+			idx := -1
+			if toolCallID != "" {
+				if found, ok := toolIndexByCallID[toolCallID]; ok {
+					idx = found
+				}
+			}
+			if idx < 0 && unmatchedToolIdx < len(summary.ToolExecutions) {
+				idx = unmatchedToolIdx
+				unmatchedToolIdx++
+			}
+			if idx >= 0 && idx < len(summary.ToolExecutions) {
+				if summary.ToolExecutions[idx].ToolName == "" {
+					summary.ToolExecutions[idx].ToolName = toolName
+				}
+				if summary.ToolExecutions[idx].ToolCallID == "" {
+					summary.ToolExecutions[idx].ToolCallID = toolCallID
+				}
+				summary.ToolExecutions[idx].ExecutionID = execID
+				if status != "" {
+					summary.ToolExecutions[idx].Status = status
+				}
+			} else {
+				summary.ToolExecutions = append(summary.ToolExecutions, ProcessDetailsToolExecution{
+					ProcessDetailID: strings.TrimSpace(detailID),
+					ToolName:        toolName,
+					ToolCallID:      toolCallID,
+					ExecutionID:     execID,
+					Status:          status,
+				})
+			}
+		}
+		if execID != "" && !seenExecIDs[execID] {
+			seenExecIDs[execID] = true
+			summary.MCPExecutionIDs = append(summary.MCPExecutionIDs, execID)
+		}
+	}
+	if err := execRows.Err(); err != nil {
+		execRows.Close()
+		return nil, fmt.Errorf("遍历工具执行摘要失败: %w", err)
+	}
+	execRows.Close()
 
 	rows, err := db.Query(
 		"SELECT data FROM process_details WHERE message_id = ? AND event_type = 'iteration' ORDER BY created_at ASC, rowid ASC",
@@ -1302,6 +1446,36 @@ func (db *DB) GetProcessDetailsPage(messageID string, limit, offset int) ([]Proc
 	}
 
 	return details, total, nil
+}
+
+// GetProcessDetailOffset 返回某条过程详情在所属消息详情流中的零基 offset。
+func (db *DB) GetProcessDetailOffset(messageID, detailID string) (int, error) {
+	messageID = strings.TrimSpace(messageID)
+	detailID = strings.TrimSpace(detailID)
+	if messageID == "" || detailID == "" {
+		return 0, fmt.Errorf("messageID and detailID are required")
+	}
+	var createdAt string
+	var rowID int64
+	if err := db.QueryRow(
+		"SELECT created_at, rowid FROM process_details WHERE message_id = ? AND id = ?",
+		messageID, detailID,
+	).Scan(&createdAt, &rowID); err != nil {
+		if err == sql.ErrNoRows {
+			return 0, fmt.Errorf("过程详情不存在")
+		}
+		return 0, fmt.Errorf("查询过程详情锚点失败: %w", err)
+	}
+	var offset int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM process_details
+		 WHERE message_id = ?
+		   AND (created_at < ? OR (created_at = ? AND rowid < ?))`,
+		messageID, createdAt, createdAt, rowID,
+	).Scan(&offset); err != nil {
+		return 0, fmt.Errorf("计算过程详情锚点位置失败: %w", err)
+	}
+	return offset, nil
 }
 
 // GetProcessDetailsByConversation 获取对话的所有过程详情（按消息分组）

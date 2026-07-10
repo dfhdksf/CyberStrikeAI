@@ -75,6 +75,8 @@ func RunDeepAgent(
 		return nil, fmt.Errorf("multiagent: 配置或 Agent 为空")
 	}
 
+	runtimeUserMessage := prepareLatestUserMessageForModel(userMessage, appCfg, &ma.EinoMiddleware, conversationID, logger)
+
 	effectiveSubs := ma.SubAgents
 	var markdownLoad *agents.MarkdownDirLoad
 	var orch *agents.OrchestratorMarkdown
@@ -390,7 +392,7 @@ func RunDeepAgent(
 			}
 		}
 	}
-	if mw := newTaskContextEnrichMiddleware(userMessage, history, ma.SubAgentUserContextMaxRunesEffective(), taskBlackboardSupplement); mw != nil {
+	if mw := newTaskContextEnrichMiddleware(runtimeUserMessage, history, ma.SubAgentUserContextMaxRunesEffective(), taskBlackboardSupplement); mw != nil {
 		deepHandlers = append(deepHandlers, mw)
 	}
 	if len(mainOrchestratorPre) > 0 {
@@ -557,7 +559,7 @@ func RunDeepAgent(
 	}
 
 	baseMsgs := historyToMessages(history, appCfg, &ma.EinoMiddleware)
-	baseMsgs = appendUserMessageIfNeeded(baseMsgs, userMessage)
+	baseMsgs = appendUserMessageIfNeeded(baseMsgs, runtimeUserMessage)
 
 	streamsMainAssistant := func(agent string) bool {
 		if orchMode == "plan_execute" {

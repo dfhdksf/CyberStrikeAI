@@ -72,6 +72,56 @@ func TestPersistAuthPasswordDoesNotTreatQuotedHashAsComment(t *testing.T) {
 	}
 }
 
+func TestEnsureLocalConfigCreatesFromExampleWithGeneratedPassword(t *testing.T) {
+	dir := t.TempDir()
+	examplePath := filepath.Join(dir, "config.example.yaml")
+	configPath := filepath.Join(dir, "config.yaml")
+
+	example := []byte(`auth:
+  password: "change-me-use-a-long-random-password"
+  session_duration_hours: 12
+server:
+  host: 127.0.0.1
+  port: 8080
+`)
+	if err := os.WriteFile(examplePath, example, 0644); err != nil {
+		t.Fatalf("write example: %v", err)
+	}
+
+	result, err := EnsureLocalConfig(configPath)
+	if err != nil {
+		t.Fatalf("EnsureLocalConfig: %v", err)
+	}
+	if !result.Created {
+		t.Fatal("Created = false, want true")
+	}
+	if result.GeneratedPassword == "" {
+		t.Fatal("GeneratedPassword is empty")
+	}
+	if result.ExamplePath != examplePath {
+		t.Fatalf("ExamplePath = %q, want %q", result.ExamplePath, examplePath)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load generated config: %v", err)
+	}
+	if cfg.Auth.Password == "change-me-use-a-long-random-password" {
+		t.Fatal("auth.password still contains the template placeholder")
+	}
+	if cfg.Auth.Password != result.GeneratedPassword {
+		t.Fatalf("Auth.Password = %q, want generated password %q", cfg.Auth.Password, result.GeneratedPassword)
+	}
+
+	second, err := EnsureLocalConfig(configPath)
+	if err != nil {
+		t.Fatalf("EnsureLocalConfig existing: %v", err)
+	}
+	if second.Created {
+		t.Fatal("Created = true for existing config, want false")
+	}
+}
+
 func TestHitlAuditModelEffectiveFallsBackToMainConfig(t *testing.T) {
 	main := OpenAIConfig{
 		Provider: "openai",
@@ -89,5 +139,54 @@ func TestHitlAuditModelEffectiveFallsBackToMainConfig(t *testing.T) {
 	}
 	if got.Model != "small-reviewer" {
 		t.Fatalf("expected audit model override, got %q", got.Model)
+	}
+}
+
+func TestSummarizationUserIntentLedgerRunesEffective(t *testing.T) {
+	var zero MultiAgentEinoMiddlewareConfig
+	if got := zero.SummarizationUserIntentLedgerMaxRunesEffective(); got != DefaultSummarizationUserIntentLedgerMaxRunes {
+		t.Fatalf("default ledger max runes = %d, want %d", got, DefaultSummarizationUserIntentLedgerMaxRunes)
+	}
+	if got := zero.SummarizationUserIntentLedgerEntryMaxRunesEffective(); got != DefaultSummarizationUserIntentLedgerEntryMaxRunes {
+		t.Fatalf("default ledger entry max runes = %d, want %d", got, DefaultSummarizationUserIntentLedgerEntryMaxRunes)
+	}
+
+	custom := MultiAgentEinoMiddlewareConfig{
+		SummarizationUserIntentLedgerMaxRunes:      12345,
+		SummarizationUserIntentLedgerEntryMaxRunes: 2345,
+	}
+	if got := custom.SummarizationUserIntentLedgerMaxRunesEffective(); got != 12345 {
+		t.Fatalf("custom ledger max runes = %d", got)
+	}
+	if got := custom.SummarizationUserIntentLedgerEntryMaxRunesEffective(); got != 2345 {
+		t.Fatalf("custom ledger entry max runes = %d", got)
+	}
+}
+
+func TestLatestUserMessageRunesEffective(t *testing.T) {
+	var zero MultiAgentEinoMiddlewareConfig
+	if got := zero.LatestUserMessageMaxRunesEffective(); got != DefaultLatestUserMessageMaxRunes {
+		t.Fatalf("default latest user max runes = %d, want %d", got, DefaultLatestUserMessageMaxRunes)
+	}
+	if got := zero.LatestUserMessageHeadRunesEffective(); got != DefaultLatestUserMessageHeadRunes {
+		t.Fatalf("default latest user head runes = %d, want %d", got, DefaultLatestUserMessageHeadRunes)
+	}
+	if got := zero.LatestUserMessageTailRunesEffective(); got != DefaultLatestUserMessageTailRunes {
+		t.Fatalf("default latest user tail runes = %d, want %d", got, DefaultLatestUserMessageTailRunes)
+	}
+
+	custom := MultiAgentEinoMiddlewareConfig{
+		LatestUserMessageMaxRunes:  100,
+		LatestUserMessageHeadRunes: 40,
+		LatestUserMessageTailRunes: 60,
+	}
+	if got := custom.LatestUserMessageMaxRunesEffective(); got != 100 {
+		t.Fatalf("custom latest user max runes = %d", got)
+	}
+	if got := custom.LatestUserMessageHeadRunesEffective(); got != 40 {
+		t.Fatalf("custom latest user head runes = %d", got)
+	}
+	if got := custom.LatestUserMessageTailRunesEffective(); got != 60 {
+		t.Fatalf("custom latest user tail runes = %d", got)
 	}
 }

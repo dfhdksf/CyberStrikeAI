@@ -50,6 +50,7 @@ func RunEinoSingleChatModelAgent(
 	if ma == nil {
 		return nil, fmt.Errorf("eino single: multi_agent 配置为空")
 	}
+	runtimeUserMessage := prepareLatestUserMessageForModel(userMessage, appCfg, &ma.EinoMiddleware, conversationID, logger)
 
 	einoLoc, einoSkillMW, einoFSTools, skillsRoot, einoErr := prepareEinoSkills(ctx, appCfg.SkillsDir, ma, logger)
 	if einoErr != nil {
@@ -201,7 +202,7 @@ func RunEinoSingleChatModelAgent(
 	}
 
 	baseMsgs := historyToMessages(history, appCfg, &ma.EinoMiddleware)
-	baseMsgs = appendUserMessageIfNeeded(baseMsgs, userMessage)
+	baseMsgs = appendUserMessageIfNeeded(baseMsgs, runtimeUserMessage)
 
 	streamsMainAssistant := func(agent string) bool {
 		return agent == "" || agent == einoSingleAgentName

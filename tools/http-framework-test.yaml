@@ -127,6 +127,11 @@ args:
         return urllib.parse.urlunsplit((parts.scheme, parts.netloc, path, query, fragment))
 
 
+    def quote_form_component_preserving_pct(value: str) -> str:
+        normalized = urllib.parse.unquote(value)
+        return urllib.parse.quote_plus(normalized, safe="")
+
+
     def encode_form_data(data: str) -> str:
         if not data:
             return data
@@ -191,10 +196,11 @@ args:
 
         for key, value in pairs:
             if key is None:
-                parts.append(urllib.parse.quote_plus(value, safe=""))
+                parts.append(quote_form_component_preserving_pct(value))
             else:
-                encoded_value = urllib.parse.quote_plus(value, safe="")
-                parts.append(f"{key}={encoded_value}")
+                encoded_key = quote_form_component_preserving_pct(key)
+                encoded_value = quote_form_component_preserving_pct(value)
+                parts.append(f"{encoded_key}={encoded_value}")
 
         return "&".join(parts)
 
@@ -999,7 +1005,7 @@ description: |
 
   **亮点：**
   - 纯 Python 实现：httpx 会话重用、HTTP/2/代理/certs 直接在脚本内配置，无外部二进制依赖
-  - 智能 Body 编码：支持 application/x-www-form-urlencoded 二次编码、JSON/文本 charset 推断、
+  - 智能 Body 编码：支持 application/x-www-form-urlencoded 规范化编码、JSON/文本 charset 推断、
     `@file`/`@-` 注入二进制、可视化调试
   - 连接探针：在无代理场景下额外进行 DNS/TCP/TLS 探测，粗粒度复刻 curl -w 指标
   - 可重复观测：repeat/delay + TTFB/total/speed_download 统计，便于盲注/时序测试

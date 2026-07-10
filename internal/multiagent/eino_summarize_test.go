@@ -498,3 +498,47 @@ func TestRefreshFactIndexInMessages(t *testing.T) {
 		t.Fatalf("non-index system content should be preserved: %q", sys)
 	}
 }
+
+func TestBuildOriginalUserIntentLedgerMessageFromStore_UsesDatabaseAsCanonicalSource(t *testing.T) {
+	t.Parallel()
+	dbPath := filepath.Join(t.TempDir(), "summarize-user-ledger.db")
+	db, err := database.NewDB(dbPath, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	conv, err := db.CreateConversation("ledger", database.ConversationCreateMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := db.AddMessage(conv.ID, "user", "原始用户输入：只测 staging，不要碰 prod。", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AddMessage(conv.ID, "assistant", "处理中...", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	ledger := buildOriginalUserIntentLedgerMessageFromStore(
+		db,
+		conv.ID,
+		[]adk.Message{schema.UserMessage("内存里的派生/续跑消息，不应作为权威源。")},
+		config.DefaultSummarizationUserIntentLedgerMaxRunes,
+		config.DefaultSummarizationUserIntentLedgerEntryMaxRunes,
+		zap.NewNop(),
+	)
+	if ledger == nil {
+		t.Fatal("expected ledger message")
+	}
+	body := ledger.Content
+	if !strings.Contains(body, stored.ID) {
+		t.Fatalf("ledger should include canonical DB message id %q: %q", stored.ID, body)
+	}
+	if !strings.Contains(body, "只测 staging，不要碰 prod") {
+		t.Fatalf("ledger should include stored user content: %q", body)
+	}
+	if strings.Contains(body, "内存里的派生") {
+		t.Fatalf("fallback in-memory user message should not be used when DB has user messages: %q", body)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"cyberstrike-ai/internal/agent"
 	"cyberstrike-ai/internal/config"
@@ -14,11 +15,11 @@ import (
 	"cyberstrike-ai/internal/project"
 
 	"github.com/bytedance/sonic"
+	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/summarization"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
-	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 	"go.uber.org/zap"
 )
 
@@ -98,9 +99,13 @@ func newEinoSummarizationMiddleware(
 	}
 	triggerRatio := 0.8
 	emitInternalEvents := true
+	userLedgerMaxRunes := config.DefaultSummarizationUserIntentLedgerMaxRunes
+	userLedgerEntryMaxRunes := config.DefaultSummarizationUserIntentLedgerEntryMaxRunes
 	if mwCfg != nil {
 		triggerRatio = mwCfg.SummarizationTriggerRatioEffective()
 		emitInternalEvents = mwCfg.SummarizationEmitInternalEventsEffective()
+		userLedgerMaxRunes = mwCfg.SummarizationUserIntentLedgerMaxRunesEffective()
+		userLedgerEntryMaxRunes = mwCfg.SummarizationUserIntentLedgerEntryMaxRunesEffective()
 	}
 	// Keep enough safety margin for tokenizer/model-side accounting mismatch.
 	trigger := int(float64(maxTotal) * triggerRatio)
@@ -190,10 +195,13 @@ func newEinoSummarizationMiddleware(
 		},
 		Finalize: func(ctx context.Context, originalMessages []adk.Message, summary adk.Message) ([]adk.Message, error) {
 			summary = stripAnalysisFromSummarizationMessage(summary)
-			out, ferr := summarizeFinalizeWithRecentAssistantToolTrail(ctx, originalMessages, summary, tokenCounter, recentTrailMax)
+			userLedger := buildOriginalUserIntentLedgerMessageFromStore(db, conversationID, originalMessages, userLedgerMaxRunes, userLedgerEntryMaxRunes, logger)
+			compactionMessages := stripOriginalUserIntentLedgerFromMessages(originalMessages)
+			out, ferr := summarizeFinalizeWithRecentAssistantToolTrail(ctx, compactionMessages, summary, tokenCounter, recentTrailMax)
 			if ferr != nil {
 				return nil, ferr
 			}
+			out = mergeMessageIntoLeadingSystem(out, userLedger)
 			if appCfg != nil {
 				out = refreshFactIndexInMessages(out, db, projectID, appCfg.Project, logger)
 			}
@@ -228,6 +236,61 @@ func newEinoSummarizationMiddleware(
 		return nil, fmt.Errorf("summarization.New: %w", err)
 	}
 	return mw, nil
+}
+
+func buildOriginalUserIntentLedgerMessageFromStore(
+	db *database.DB,
+	conversationID string,
+	fallbackMessages []adk.Message,
+	maxRunes int,
+	entryMaxRunes int,
+	logger *zap.Logger,
+) adk.Message {
+	conversationID = strings.TrimSpace(conversationID)
+	if db == nil || conversationID == "" {
+		return buildOriginalUserIntentLedgerMessage(fallbackMessages, maxRunes, entryMaxRunes)
+	}
+	msgs, err := db.GetMessages(conversationID)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("summarization: 从数据库读取原始用户消息失败，回退到当前上下文",
+				zap.String("conversationId", conversationID),
+				zap.Error(err),
+			)
+		}
+		return buildOriginalUserIntentLedgerMessage(fallbackMessages, maxRunes, entryMaxRunes)
+	}
+	userMsgs := make([]adk.Message, 0, len(msgs))
+	for _, msg := range msgs {
+		if strings.ToLower(strings.TrimSpace(msg.Role)) != "user" {
+			continue
+		}
+		content := strings.TrimSpace(msg.Content)
+		if content == "" {
+			continue
+		}
+		userMsgs = append(userMsgs, schema.UserMessage(formatStoredUserLedgerText(msg)))
+	}
+	if len(userMsgs) == 0 {
+		return buildOriginalUserIntentLedgerMessage(fallbackMessages, maxRunes, entryMaxRunes)
+	}
+	return buildOriginalUserIntentLedgerMessage(userMsgs, maxRunes, entryMaxRunes)
+}
+
+func formatStoredUserLedgerText(msg database.Message) string {
+	var parts []string
+	if id := strings.TrimSpace(msg.ID); id != "" {
+		parts = append(parts, "message_id="+id)
+	}
+	if !msg.CreatedAt.IsZero() {
+		parts = append(parts, "created_at="+msg.CreatedAt.Format(time.RFC3339Nano))
+	}
+	meta := strings.Join(parts, " ")
+	content := strings.TrimSpace(msg.Content)
+	if meta == "" {
+		return content
+	}
+	return meta + "\n" + content
 }
 
 // refreshFactIndexInMessages 在 summarization 压缩后，用 DB 最新索引替换 system 中已有的项目黑板索引段。
