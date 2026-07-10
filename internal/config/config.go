@@ -538,14 +538,50 @@ type RobotsConfig struct {
 
 // RobotWechatConfig 微信 iLink 机器人配置（个人微信 ClawBot / iLink 协议）
 type RobotWechatConfig struct {
-	Enabled       bool   `yaml:"enabled" json:"enabled"`
-	BotToken      string `yaml:"bot_token,omitempty" json:"bot_token,omitempty"`
-	ILinkBotID    string `yaml:"ilink_bot_id,omitempty" json:"ilink_bot_id,omitempty"`
-	ILinkUserID   string `yaml:"ilink_user_id,omitempty" json:"ilink_user_id,omitempty"`
-	BaseURL       string `yaml:"base_url,omitempty" json:"base_url,omitempty"`               // 默认 https://ilinkai.weixin.qq.com
-	BotType       string `yaml:"bot_type,omitempty" json:"bot_type,omitempty"`               // get_bot_qrcode 参数，默认 3
-	BotAgent      string `yaml:"bot_agent,omitempty" json:"bot_agent,omitempty"`             // base_info.bot_agent
-	GetUpdatesBuf string `yaml:"get_updates_buf,omitempty" json:"get_updates_buf,omitempty"` // 长轮询游标（运行时）
+	Enabled       bool                     `yaml:"enabled" json:"enabled"`
+	BotToken      string                   `yaml:"bot_token,omitempty" json:"bot_token,omitempty"`
+	ILinkBotID    string                   `yaml:"ilink_bot_id,omitempty" json:"ilink_bot_id,omitempty"`
+	ILinkUserID   string                   `yaml:"ilink_user_id,omitempty" json:"ilink_user_id,omitempty"`
+	BaseURL       string                   `yaml:"base_url,omitempty" json:"base_url,omitempty"`               // 默认 https://ilinkai.weixin.qq.com
+	BotType       string                   `yaml:"bot_type,omitempty" json:"bot_type,omitempty"`               // get_bot_qrcode 参数，默认 3
+	BotAgent      string                   `yaml:"bot_agent,omitempty" json:"bot_agent,omitempty"`             // base_info.bot_agent
+	GetUpdatesBuf string                   `yaml:"get_updates_buf,omitempty" json:"get_updates_buf,omitempty"` // 长轮询游标（运行时）
+	Auth          RobotAuthorizationConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
+}
+
+const (
+	RobotAuthModeUserBinding    = "user_binding"
+	RobotAuthModeServiceAccount = "service_account"
+)
+
+// RobotAuthorizationConfig controls how a verified platform sender becomes
+// an RBAC principal. service_account is intentionally fail-closed unless an
+// explicit non-admin service user and sender allowlist are both configured.
+type RobotAuthorizationConfig struct {
+	Mode                 string   `yaml:"mode,omitempty" json:"mode,omitempty"`
+	ServiceUserID        string   `yaml:"service_user_id,omitempty" json:"service_user_id,omitempty"`
+	AllowedExternalUsers []string `yaml:"allowed_external_users,omitempty" json:"allowed_external_users,omitempty"`
+}
+
+func (c RobotAuthorizationConfig) EffectiveMode() string {
+	mode := strings.ToLower(strings.TrimSpace(c.Mode))
+	if mode == "" {
+		return RobotAuthModeUserBinding
+	}
+	return mode
+}
+
+func (c RobotAuthorizationConfig) ExternalUserAllowed(externalUserID string) bool {
+	externalUserID = strings.TrimSpace(externalUserID)
+	if externalUserID == "" {
+		return false
+	}
+	for _, allowed := range c.AllowedExternalUsers {
+		if strings.TrimSpace(allowed) == externalUserID {
+			return true
+		}
+	}
+	return false
 }
 
 // RobotSessionConfig 机器人会话隔离策略
@@ -563,12 +599,13 @@ func (c RobotSessionConfig) StrictUserIdentityEnabled() bool {
 
 // RobotWecomConfig 企业微信机器人配置
 type RobotWecomConfig struct {
-	Enabled        bool   `yaml:"enabled" json:"enabled"`
-	Token          string `yaml:"token" json:"token"`                       // 回调 URL 校验 Token
-	EncodingAESKey string `yaml:"encoding_aes_key" json:"encoding_aes_key"` // EncodingAESKey
-	CorpID         string `yaml:"corp_id" json:"corp_id"`                   // 企业 ID
-	Secret         string `yaml:"secret" json:"secret"`                     // 应用 Secret
-	AgentID        int64  `yaml:"agent_id" json:"agent_id"`                 // 应用 AgentId
+	Enabled        bool                     `yaml:"enabled" json:"enabled"`
+	Token          string                   `yaml:"token" json:"token"`                       // 回调 URL 校验 Token
+	EncodingAESKey string                   `yaml:"encoding_aes_key" json:"encoding_aes_key"` // EncodingAESKey
+	CorpID         string                   `yaml:"corp_id" json:"corp_id"`                   // 企业 ID
+	Secret         string                   `yaml:"secret" json:"secret"`                     // 应用 Secret
+	AgentID        int64                    `yaml:"agent_id" json:"agent_id"`                 // 应用 AgentId
+	Auth           RobotAuthorizationConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
 }
 
 // ValidateWecomConfig 校验企业微信机器人配置；启用时必须配置 token，否则回调无法防伪造。
@@ -584,50 +621,137 @@ func ValidateWecomConfig(w RobotWecomConfig) error {
 
 // RobotDingtalkConfig 钉钉机器人配置
 type RobotDingtalkConfig struct {
-	Enabled                     bool   `yaml:"enabled" json:"enabled"`
-	ClientID                    string `yaml:"client_id" json:"client_id"`                                           // 应用 Key (AppKey)
-	ClientSecret                string `yaml:"client_secret" json:"client_secret"`                                   // 应用 Secret
-	AllowConversationIDFallback bool   `yaml:"allow_conversation_id_fallback" json:"allow_conversation_id_fallback"` // sender_id 缺失时是否允许回退到会话 ID
+	Enabled                     bool                     `yaml:"enabled" json:"enabled"`
+	ClientID                    string                   `yaml:"client_id" json:"client_id"`                                           // 应用 Key (AppKey)
+	ClientSecret                string                   `yaml:"client_secret" json:"client_secret"`                                   // 应用 Secret
+	AllowConversationIDFallback bool                     `yaml:"allow_conversation_id_fallback" json:"allow_conversation_id_fallback"` // sender_id 缺失时是否允许回退到会话 ID
+	Auth                        RobotAuthorizationConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
 }
 
 // RobotLarkConfig 飞书机器人配置
 type RobotLarkConfig struct {
-	Enabled             bool   `yaml:"enabled" json:"enabled"`
-	AppID               string `yaml:"app_id" json:"app_id"`                                 // 应用 App ID
-	AppSecret           string `yaml:"app_secret" json:"app_secret"`                         // 应用 App Secret
-	VerifyToken         string `yaml:"verify_token" json:"verify_token"`                     // 事件订阅 Verification Token（可选）
-	AllowChatIDFallback bool   `yaml:"allow_chat_id_fallback" json:"allow_chat_id_fallback"` // 用户 ID 缺失时是否允许回退到 chat_id
+	Enabled             bool                     `yaml:"enabled" json:"enabled"`
+	AppID               string                   `yaml:"app_id" json:"app_id"`                                 // 应用 App ID
+	AppSecret           string                   `yaml:"app_secret" json:"app_secret"`                         // 应用 App Secret
+	VerifyToken         string                   `yaml:"verify_token" json:"verify_token"`                     // 事件订阅 Verification Token（可选）
+	AllowChatIDFallback bool                     `yaml:"allow_chat_id_fallback" json:"allow_chat_id_fallback"` // 用户 ID 缺失时是否允许回退到 chat_id
+	Auth                RobotAuthorizationConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
 }
 
 // RobotTelegramConfig Telegram 机器人配置（Bot API 长轮询）
 type RobotTelegramConfig struct {
-	Enabled            bool   `yaml:"enabled" json:"enabled"`
-	BotToken           string `yaml:"bot_token" json:"bot_token"`
-	BotUsername        string `yaml:"bot_username,omitempty" json:"bot_username,omitempty"` // 可选，用于群聊 @ 识别；留空则启动时 getMe
-	AllowGroupMessages bool   `yaml:"allow_group_messages" json:"allow_group_messages"`     // 群聊中仅响应 @ 机器人
-	UpdateOffset       int64  `yaml:"update_offset,omitempty" json:"update_offset,omitempty"`
+	Enabled            bool                     `yaml:"enabled" json:"enabled"`
+	BotToken           string                   `yaml:"bot_token" json:"bot_token"`
+	BotUsername        string                   `yaml:"bot_username,omitempty" json:"bot_username,omitempty"` // 可选，用于群聊 @ 识别；留空则启动时 getMe
+	AllowGroupMessages bool                     `yaml:"allow_group_messages" json:"allow_group_messages"`     // 群聊中仅响应 @ 机器人
+	UpdateOffset       int64                    `yaml:"update_offset,omitempty" json:"update_offset,omitempty"`
+	Auth               RobotAuthorizationConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
 }
 
 // RobotSlackConfig Slack 机器人配置（Socket Mode，无需公网回调）
 type RobotSlackConfig struct {
-	Enabled  bool   `yaml:"enabled" json:"enabled"`
-	BotToken string `yaml:"bot_token" json:"bot_token"` // xoxb-
-	AppToken string `yaml:"app_token" json:"app_token"` // xapp-（connections:write）
+	Enabled  bool                     `yaml:"enabled" json:"enabled"`
+	BotToken string                   `yaml:"bot_token" json:"bot_token"` // xoxb-
+	AppToken string                   `yaml:"app_token" json:"app_token"` // xapp-（connections:write）
+	Auth     RobotAuthorizationConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
 }
 
 // RobotDiscordConfig Discord 机器人配置（Gateway WebSocket）
 type RobotDiscordConfig struct {
-	Enabled            bool   `yaml:"enabled" json:"enabled"`
-	BotToken           string `yaml:"bot_token" json:"bot_token"`
-	AllowGuildMessages bool   `yaml:"allow_guild_messages" json:"allow_guild_messages"` // 服务器频道中仅响应 @ 机器人
+	Enabled            bool                     `yaml:"enabled" json:"enabled"`
+	BotToken           string                   `yaml:"bot_token" json:"bot_token"`
+	AllowGuildMessages bool                     `yaml:"allow_guild_messages" json:"allow_guild_messages"` // 服务器频道中仅响应 @ 机器人
+	Auth               RobotAuthorizationConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
 }
 
 // RobotQQConfig QQ 机器人配置（QQ 开放平台 WebSocket）
 type RobotQQConfig struct {
-	Enabled      bool   `yaml:"enabled" json:"enabled"`
-	AppID        string `yaml:"app_id" json:"app_id"`
-	ClientSecret string `yaml:"client_secret" json:"client_secret"`
-	Sandbox      bool   `yaml:"sandbox" json:"sandbox"` // 沙箱环境（上线前测试）
+	Enabled      bool                     `yaml:"enabled" json:"enabled"`
+	AppID        string                   `yaml:"app_id" json:"app_id"`
+	ClientSecret string                   `yaml:"client_secret" json:"client_secret"`
+	Sandbox      bool                     `yaml:"sandbox" json:"sandbox"` // 沙箱环境（上线前测试）
+	Auth         RobotAuthorizationConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
+}
+
+func (c RobotsConfig) AuthorizationFor(platform string) RobotAuthorizationConfig {
+	switch strings.ToLower(strings.TrimSpace(platform)) {
+	case "wechat":
+		return c.Wechat.Auth
+	case "wecom":
+		return c.Wecom.Auth
+	case "dingtalk":
+		return c.Dingtalk.Auth
+	case "lark":
+		return c.Lark.Auth
+	case "telegram":
+		return c.Telegram.Auth
+	case "slack":
+		return c.Slack.Auth
+	case "discord":
+		return c.Discord.Auth
+	case "qq":
+		return c.QQ.Auth
+	default:
+		return RobotAuthorizationConfig{}
+	}
+}
+
+func ValidateRobotAuthorization(c RobotAuthorizationConfig, path string) error {
+	switch c.EffectiveMode() {
+	case RobotAuthModeUserBinding:
+		return nil
+	case RobotAuthModeServiceAccount:
+		serviceUserID := strings.TrimSpace(c.ServiceUserID)
+		if serviceUserID == "" {
+			return fmt.Errorf("%s.auth.service_user_id 不能为空", path)
+		}
+		if len(c.AllowedExternalUsers) == 0 {
+			return fmt.Errorf("%s.auth.allowed_external_users 至少配置一个真实发送者", path)
+		}
+		seen := map[string]bool{}
+		for _, userID := range c.AllowedExternalUsers {
+			userID = strings.TrimSpace(userID)
+			if userID == "" || userID == "*" {
+				return fmt.Errorf("%s.auth.allowed_external_users 不允许空值或通配符", path)
+			}
+			if seen[userID] {
+				return fmt.Errorf("%s.auth.allowed_external_users 包含重复用户", path)
+			}
+			seen[userID] = true
+		}
+		return nil
+	default:
+		return fmt.Errorf("%s.auth.mode 仅支持 user_binding 或 service_account", path)
+	}
+}
+
+func ValidateRobotsAuthorization(c RobotsConfig) error {
+	items := []struct {
+		path string
+		auth RobotAuthorizationConfig
+	}{
+		{"robots.wechat", c.Wechat.Auth}, {"robots.wecom", c.Wecom.Auth},
+		{"robots.dingtalk", c.Dingtalk.Auth}, {"robots.lark", c.Lark.Auth},
+		{"robots.telegram", c.Telegram.Auth}, {"robots.slack", c.Slack.Auth},
+		{"robots.discord", c.Discord.Auth}, {"robots.qq", c.QQ.Auth},
+	}
+	for _, item := range items {
+		if err := ValidateRobotAuthorization(item.auth, item.path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c RobotsConfig) ServiceAccountUserIDs() map[string]string {
+	out := map[string]string{}
+	for _, platform := range []string{"wechat", "wecom", "dingtalk", "lark", "telegram", "slack", "discord", "qq"} {
+		auth := c.AuthorizationFor(platform)
+		if auth.EffectiveMode() == RobotAuthModeServiceAccount {
+			out[platform] = strings.TrimSpace(auth.ServiceUserID)
+		}
+	}
+	return out
 }
 
 type ServerConfig struct {
@@ -1105,6 +1229,9 @@ func Load(path string) (*Config, error) {
 	}
 
 	if err := ValidateWecomConfig(cfg.Robots.Wecom); err != nil {
+		return nil, err
+	}
+	if err := ValidateRobotsAuthorization(cfg.Robots); err != nil {
 		return nil, err
 	}
 
