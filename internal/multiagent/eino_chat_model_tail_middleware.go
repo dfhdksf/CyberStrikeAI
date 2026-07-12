@@ -18,8 +18,9 @@ import (
 //  5. soft model-input budget (warn/compact only, never fail locally)
 //  6. final tool-call/result reconciliation
 //  7. orphan tool prune (defense in depth)
-//  8. telemetry
-//  9. model-facing trace snapshot
+//  8. malformed tool_search history repair
+//  9. telemetry
+//  10. model-facing trace snapshot
 type einoChatModelTailConfig struct {
 	logger           *zap.Logger
 	phase            string
@@ -48,6 +49,7 @@ func appendEinoChatModelTailMiddlewares(handlers []adk.ChatModelAgentMiddleware,
 	if !cfg.skipOrphanPruner {
 		handlers = append(handlers, newOrphanToolPrunerMiddleware(cfg.logger, cfg.phase))
 	}
+	handlers = append(handlers, newToolSearchResultSanitizerMiddleware(cfg.logger, cfg.phase))
 	if !cfg.skipTelemetry {
 		if teleMw := newEinoModelInputTelemetryMiddleware(cfg.logger, cfg.modelName, cfg.conversationID, cfg.phase); teleMw != nil {
 			handlers = append(handlers, teleMw)
