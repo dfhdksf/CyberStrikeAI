@@ -48,3 +48,4 @@ vendor/
 data
 reference
 tmp
+config.yaml.backup

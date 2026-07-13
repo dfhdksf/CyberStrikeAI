@@ -10,7 +10,7 @@
 # ============================================
 
 # 前端显示的版本号（可选，不填则显示默认版本）
-version: "v1.6.51"
+version: "v1.7.2"
 # 服务器配置
 server:
   host: 0.0.0.0 # 监听地址，0.0.0.0 表示监听所有网络接口
@@ -28,7 +28,10 @@ server:
   tls_auto_self_sign: true
 # 认证配置
 auth:
+<<<<<<<< HEAD:config.yaml
   password: lilinfei # Web 登录密码，请修改为强密码
+========
+>>>>>>>> upstream/main:config.example.yaml
   session_duration_hours: 12 # 登录有效期（小时），超时后需重新登录
 # 日志配置
 log:
@@ -203,13 +206,14 @@ multi_agent:
     tool_search_always_visible_tools: [read_file, glob, grep, analyze_image, write_file, edit_file, execute, task, transfer_to_agent, exit, write_todos, skill, tool_search, TaskCreate, TaskGet, TaskUpdate, TaskList, record_vulnerability, list_vulnerabilities, get_vulnerability, list_knowledge_risk_types, search_knowledge_base, webshell_exec, webshell_file_list, webshell_file_read, webshell_file_write, manage_webshell_list, manage_webshell_add, manage_webshell_update, manage_webshell_delete, manage_webshell_test, batch_task_list, batch_task_get, batch_task_start, batch_task_rerun, batch_task_pause, batch_task_update_metadata, batch_task_update_schedule, batch_task_schedule_enabled, batch_task_update_task, batch_task_remove_task, batch_task_delete, batch_task_create, batch_task_add_task, http-framework-test, exec] # 后端内置常驻工具白名单（优先于 always_visible 数量策略）
     plantask_enable: true # P0：主代理挂载 TaskCreate/Get/Update/List 结构化任务板；需 eino_skills 可用且 skills_dir 存在
     plantask_rel_dir: .eino/plantask # 任务文件相对 skills_dir，按会话分子目录：skills/.eino/plantask/<conversationId>/
-    reduction_enable: true # true：大工具输出截断/落盘以控上下文；依赖与 plantask 相同的 eino local 写盘后端，无后端时不挂载
+    reduction_enable: true # true：大工具输出截断/落盘以控上下文；后端会独立创建，不依赖 eino_skills 是否启用
     reduction_max_length_for_trunc: 50000 # 单条工具结果超过该字符数（bytes）时截断并落盘（由 reduction 中间件处理）
-    reduction_max_tokens_for_clear: 160000 # 历史工具结果清理阈值（tokens），超阈值时在模型调用前清理旧结果
+    reduction_max_tokens_for_clear: 60000 # 历史工具结果清理阈值（tokens），应低于 max_total_tokens * summarization_trigger_ratio
     reduction_root_dir: "" # 非空：截断/清理内容落盘根路径；空：使用系统临时目录下按会话隔离的默认路径
     reduction_clear_exclude: [] # 不参与「清理阶段」的工具名额外列表（会与 task/transfer/exit 等内置排除项合并）；需要时用 YAML 列表填写
     reduction_sub_agents: true # true：子代理也挂 reduction；false：仅编排主代理使用 reduction
     summarization_trigger_ratio: 0.8 # summarization 触发比例（max_total_tokens * ratio），建议 0.75~0.85
+    summarization_output_reserve_tokens: 8192 # 摘要模型输出预留 token；摘要输入预算 = 触发阈值 - 该值
     summarization_emit_internal_events: true # true：发出 summarization 内部事件（便于诊断）
     summarization_user_intent_ledger_max_runes: 96000 # 压缩后注入模型上下文的「原始用户输入与约束账本」总字符上限；DB 原始消息不裁剪
     summarization_user_intent_ledger_entry_max_runes: 16000 # 账本中单条用户消息的字符上限；超出仅裁剪模型可见账本，不影响 DB 原文
@@ -272,10 +276,11 @@ security:
 # MCP (Model Context Protocol) 用于工具注册和调用
 mcp:
   enabled: false # 是否启用 MCP 服务器（http模式）
-  host: 0.0.0.0 # MCP 服务器监听地址
+  host: 127.0.0.1 # MCP 服务器监听地址；需要远程访问时再显式修改并配置网络层访问控制
   port: 8081 # MCP 服务器端口
-  auth_header: "X-MCP-Token" # 鉴权：请求需携带该 header 且值与 auth_header_value 一致方可调用。留空表示不鉴权
-  auth_header_value: "" # 鉴权密钥值（与 auth_header 配合使用，建议使用随机字符串）
+  auth_header: "X-MCP-Token" # 可选的全局服务凭证 Header；普通调用请使用用户 Authorization: Bearer Token
+  auth_header_value: "" # 全局服务凭证值，仅 allow_global_access=true 时生效
+  allow_global_access: false # 高风险兼容模式：静态密钥映射为全局服务身份；默认请使用用户 Bearer Token
 # 外部 MCP 配置
 external_mcp:
   servers: {}
@@ -344,6 +349,11 @@ knowledge:
 robots:
   wechat: # 微信 iLink（个人微信 ClawBot，扫码绑定）
     enabled: false
+    # 鉴权默认 user_binding；专用机器人可改 service_account，并必须限制真实发送者
+    auth:
+      mode: user_binding # user_binding | service_account
+      # service_user_id: "admin 或专用服务账号的 RBAC user ID"
+      # allowed_external_users: ["t:tenant|u:sender"]
     bot_token: ""
     ilink_bot_id: ""
     ilink_user_id: ""
@@ -352,6 +362,8 @@ robots:
     bot_agent: CyberStrikeAI/1.0
   wecom: # 企业微信
     enabled: false
+    auth:
+      mode: user_binding
     token: ""
     encoding_aes_key: ""
     corp_id: ""
@@ -359,30 +371,42 @@ robots:
     agent_id: 0
   dingtalk: # 钉钉
     enabled: false
+    auth:
+      mode: user_binding
     client_id: ""
     client_secret: ""
     allow_conversation_id_fallback: false
   lark: # 飞书
     enabled: false
+    auth:
+      mode: user_binding
     app_id: ""
     app_secret: ""
     verify_token: ""
     allow_chat_id_fallback: false
   telegram: # Telegram
     enabled: false
+    auth:
+      mode: user_binding
     bot_token: ""
     bot_username: ""
     allow_group_messages: false
   slack: # Slack
     enabled: false
+    auth:
+      mode: user_binding
     bot_token: ""
     app_token: ""
   discord: # Discord
     enabled: false
+    auth:
+      mode: user_binding
     bot_token: ""
     allow_guild_messages: false
   qq: # QQ 机器人
     enabled: false
+    auth:
+      mode: user_binding
     app_id: ""
     client_secret: ""
     sandbox: true

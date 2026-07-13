@@ -1,6 +1,8 @@
 package multiagent
 
 import (
+	"cyberstrike-ai/internal/config"
+
 	"github.com/cloudwego/eino/adk"
 	"go.uber.org/zap"
 )
@@ -11,15 +13,21 @@ import (
 // Order (best practice):
 //  1. system merge — accurate token count for summarization
 //  2. continuation user dedup — drop stale session-resume injections
-//  3. summarization
-//  4. orphan tool prune
-//  5. telemetry
-//  6. model-facing trace snapshot
+//  3. pre-summarization tool-call/result reconciliation
+//  4. summarization
+//  5. soft model-input budget (warn/compact only, never fail locally)
+//  6. final tool-call/result reconciliation
+//  7. orphan tool prune (defense in depth)
+//  8. malformed tool_search history repair
+//  9. telemetry
+//  10. model-facing trace snapshot
 type einoChatModelTailConfig struct {
 	logger           *zap.Logger
 	phase            string
 	summarization    adk.ChatModelAgentMiddleware
 	modelName        string
+	maxTotalTokens   int
+	toolMaxBytes     int
 	conversationID   string
 	trace            *modelFacingTraceHolder
 	skipOrphanPruner bool
@@ -31,11 +39,17 @@ func appendEinoChatModelTailMiddlewares(handlers []adk.ChatModelAgentMiddleware,
 	handlers = append(handlers, newSystemMessageNormalizerMiddleware(cfg.logger, cfg.phase))
 	handlers = append(handlers, newContinuationUserDedupMiddleware(cfg.logger, cfg.phase))
 	if cfg.summarization != nil {
+		// Summarization invokes the model internally, so its input needs the same
+		// structural guarantee as the agent's final model call.
+		handlers = append(handlers, newToolPairReconcilerMiddleware(cfg.logger, cfg.phase+"_pre_summarization"))
 		handlers = append(handlers, cfg.summarization)
 	}
+	handlers = append(handlers, newModelInputSoftBudgetMiddleware(cfg.maxTotalTokens, cfg.toolMaxBytes, cfg.modelName, cfg.logger, cfg.phase))
+	handlers = append(handlers, newToolPairReconcilerMiddleware(cfg.logger, cfg.phase))
 	if !cfg.skipOrphanPruner {
 		handlers = append(handlers, newOrphanToolPrunerMiddleware(cfg.logger, cfg.phase))
 	}
+	handlers = append(handlers, newToolSearchResultSanitizerMiddleware(cfg.logger, cfg.phase))
 	if !cfg.skipTelemetry {
 		if teleMw := newEinoModelInputTelemetryMiddleware(cfg.logger, cfg.modelName, cfg.conversationID, cfg.phase); teleMw != nil {
 			handlers = append(handlers, teleMw)
@@ -47,4 +61,11 @@ func appendEinoChatModelTailMiddlewares(handlers []adk.ChatModelAgentMiddleware,
 		}
 	}
 	return handlers
+}
+
+func toolMaxBytesFromMW(mwCfg *config.MultiAgentEinoMiddlewareConfig) int {
+	if mwCfg != nil {
+		return mwCfg.ReductionMaxLengthForTruncEffective()
+	}
+	return config.MultiAgentEinoMiddlewareConfig{}.ReductionMaxLengthForTruncEffective()
 }

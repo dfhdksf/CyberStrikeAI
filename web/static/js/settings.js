@@ -7,6 +7,7 @@ let alwaysVisibleBuiltinToolNames = new Set();
 // key: 唯一工具标识符（toolKey），value: { enabled: boolean, is_external: boolean, external_mcp: string }
 let toolStateMap = new Map();
 let activeRobotEditor = '';
+let robotAuthDrafts = {};
 
 function settingsT(key, fallback) {
     if (typeof window.t === 'function') {
@@ -258,6 +259,9 @@ function refreshRobotManager() {
 }
 
 function openRobotEditor(type) {
+	if (activeRobotEditor && activeRobotEditor !== type) {
+		robotAuthDrafts[activeRobotEditor] = readRobotAuthPolicyEditor();
+	}
     activeRobotEditor = type;
     const empty = document.getElementById('robot-editor-empty');
     if (empty) empty.hidden = true;
@@ -269,6 +273,53 @@ function openRobotEditor(type) {
     if (panel) {
         panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
+    loadRobotAuthPolicyEditor(type);
+}
+
+function loadRobotAuthPolicyEditor(type) {
+    const panel = document.getElementById('robot-auth-policy-panel');
+    if (!panel) return;
+    panel.hidden = !type;
+    const auth = robotAuthDrafts[type] || (currentConfig?.robots?.[type]?.auth) || {};
+    const mode = auth.mode === 'service_account' ? 'service_account' : 'user_binding';
+    const modeInput = document.getElementById('robot-auth-mode');
+    const serviceUserInput = document.getElementById('robot-service-user-id');
+    const allowlistInput = document.getElementById('robot-allowed-external-users');
+    if (modeInput) modeInput.value = mode;
+    if (serviceUserInput) serviceUserInput.value = auth.service_user_id || '';
+    if (allowlistInput) allowlistInput.value = Array.isArray(auth.allowed_external_users) ? auth.allowed_external_users.join('\n') : '';
+    onRobotAuthModeChange();
+}
+
+function onRobotAuthModeChange() {
+    const serviceFields = document.getElementById('robot-service-account-fields');
+    if (serviceFields) serviceFields.hidden = document.getElementById('robot-auth-mode')?.value !== 'service_account';
+    updateRobotServiceAccountWarning();
+}
+
+function updateRobotServiceAccountWarning() {
+    const warning = document.getElementById('robot-service-admin-warning');
+    if (!warning) return;
+    const isServiceMode = document.getElementById('robot-auth-mode')?.value === 'service_account';
+    const userID = document.getElementById('robot-service-user-id')?.value.trim().toLowerCase() || '';
+    warning.hidden = !(isServiceMode && userID === 'admin');
+}
+
+function readRobotAuthPolicyEditor() {
+    const mode = document.getElementById('robot-auth-mode')?.value === 'service_account' ? 'service_account' : 'user_binding';
+    if (mode === 'user_binding') return { mode };
+    const allowed = (document.getElementById('robot-allowed-external-users')?.value || '')
+        .split(/[\n,，]/).map(value => value.trim()).filter(Boolean);
+    return {
+        mode,
+        service_user_id: document.getElementById('robot-service-user-id')?.value.trim() || '',
+        allowed_external_users: Array.from(new Set(allowed))
+    };
+}
+
+function robotAuthPayload(type, prevRobots) {
+    if (type === activeRobotEditor) return readRobotAuthPolicyEditor();
+    return robotAuthDrafts[type] || (prevRobots[type] && prevRobots[type].auth) || { mode: 'user_binding' };
 }
 
 function openRobotCreateModal() {
@@ -509,6 +560,13 @@ function syncC2NavFromConfig(cfg) {
 
 // 切换设置分类
 function switchSettingsSection(section) {
+    if (section === 'rbac') {
+        if (typeof switchPage === 'function') {
+            switchPage('platform-rbac');
+        }
+        return;
+    }
+
     // 更新导航项状态
     document.querySelectorAll('.settings-nav-item').forEach(item => {
         item.classList.remove('active');
@@ -577,10 +635,14 @@ window.onclick = function(event) {
 }
 
 // 加载配置
-async function loadConfig(loadTools = true) {
+async function loadConfig(loadTools = true, options = {}) {
+    const silent = options && options.silent === true;
     try {
         const response = await apiFetch('/api/config');
         if (!response.ok) {
+            if (typeof readApiError === 'function') {
+                throw new Error(await readApiError(response, '获取配置失败'));
+            }
             throw new Error('获取配置失败');
         }
         
@@ -893,6 +955,7 @@ async function loadConfig(loadTools = true) {
         syncC2NavFromConfig(currentConfig);
 
         // 填充机器人配置
+        robotAuthDrafts = {};
         const robots = currentConfig.robots || {};
         const wechat = robots.wechat || {};
         const wecom = robots.wecom || {};
@@ -986,10 +1049,17 @@ async function loadConfig(loadTools = true) {
         }
     } catch (error) {
         console.error('加载配置失败:', error);
-        const baseMsg = (typeof window !== 'undefined' && typeof window.t === 'function')
-            ? window.t('settings.apply.loadFailed')
-            : '加载配置失败';
-        alert(baseMsg + ': ' + error.message);
+        if (!silent) {
+            const baseMsg = (typeof window !== 'undefined' && typeof window.t === 'function')
+                ? window.t('settings.apply.loadFailed')
+                : '加载配置失败';
+            if (typeof notifyApiError === 'function') {
+                notifyApiError(baseMsg + ': ' + error.message);
+            } else {
+                alert(baseMsg + ': ' + error.message);
+            }
+        }
+        throw error;
     }
 }
 
@@ -1043,6 +1113,9 @@ async function loadToolsList(page = 1, searchKeyword = '', options = {}) {
         clearTimeout(timeoutId);
         
         if (!response.ok) {
+            if (typeof readApiError === 'function') {
+                throw new Error(await readApiError(response, '获取工具列表失败'));
+            }
             throw new Error('获取工具列表失败');
         }
         
@@ -1873,6 +1946,7 @@ async function applySettings() {
                 ...(prevRobots.session && typeof prevRobots.session === 'object' ? { session: prevRobots.session } : {}),
                 wechat: {
                     enabled: document.getElementById('robot-wechat-enabled')?.checked === true,
+                    auth: robotAuthPayload('wechat', prevRobots),
                     base_url: document.getElementById('robot-wechat-base-url')?.value.trim() || 'https://ilinkai.weixin.qq.com',
                     bot_type: document.getElementById('robot-wechat-bot-type')?.value.trim() || '3',
                     bot_agent: document.getElementById('robot-wechat-bot-agent')?.value.trim() || 'CyberStrikeAI/1.0',
@@ -1885,6 +1959,7 @@ async function applySettings() {
                 },
                 wecom: {
                     enabled: document.getElementById('robot-wecom-enabled')?.checked === true,
+                    auth: robotAuthPayload('wecom', prevRobots),
                     token: document.getElementById('robot-wecom-token')?.value.trim() || '',
                     encoding_aes_key: document.getElementById('robot-wecom-encoding-aes-key')?.value.trim() || '',
                     corp_id: document.getElementById('robot-wecom-corp-id')?.value.trim() || '',
@@ -1893,12 +1968,14 @@ async function applySettings() {
                 },
                 dingtalk: {
                     enabled: document.getElementById('robot-dingtalk-enabled')?.checked === true,
+                    auth: robotAuthPayload('dingtalk', prevRobots),
                     client_id: document.getElementById('robot-dingtalk-client-id')?.value.trim() || '',
                     client_secret: document.getElementById('robot-dingtalk-client-secret')?.value.trim() || '',
                     allow_conversation_id_fallback: !!(prevRobots.dingtalk && prevRobots.dingtalk.allow_conversation_id_fallback)
                 },
                 lark: {
                     enabled: document.getElementById('robot-lark-enabled')?.checked === true,
+                    auth: robotAuthPayload('lark', prevRobots),
                     app_id: document.getElementById('robot-lark-app-id')?.value.trim() || '',
                     app_secret: document.getElementById('robot-lark-app-secret')?.value.trim() || '',
                     verify_token: document.getElementById('robot-lark-verify-token')?.value.trim() || '',
@@ -1906,6 +1983,7 @@ async function applySettings() {
                 },
                 telegram: {
                     enabled: document.getElementById('robot-telegram-enabled')?.checked === true,
+                    auth: robotAuthPayload('telegram', prevRobots),
                     bot_token: document.getElementById('robot-telegram-bot-token')?.value.trim() || '',
                     bot_username: document.getElementById('robot-telegram-bot-username')?.value.trim() || '',
                     allow_group_messages: document.getElementById('robot-telegram-allow-group')?.checked === true,
@@ -1915,16 +1993,19 @@ async function applySettings() {
                 },
                 slack: {
                     enabled: document.getElementById('robot-slack-enabled')?.checked === true,
+                    auth: robotAuthPayload('slack', prevRobots),
                     bot_token: document.getElementById('robot-slack-bot-token')?.value.trim() || '',
                     app_token: document.getElementById('robot-slack-app-token')?.value.trim() || ''
                 },
                 discord: {
                     enabled: document.getElementById('robot-discord-enabled')?.checked === true,
+                    auth: robotAuthPayload('discord', prevRobots),
                     bot_token: document.getElementById('robot-discord-bot-token')?.value.trim() || '',
                     allow_guild_messages: document.getElementById('robot-discord-allow-guild')?.checked === true
                 },
                 qq: {
                     enabled: document.getElementById('robot-qq-enabled')?.checked === true,
+                    auth: robotAuthPayload('qq', prevRobots),
                     app_id: document.getElementById('robot-qq-app-id')?.value.trim() || '',
                     client_secret: document.getElementById('robot-qq-client-secret')?.value.trim() || '',
                     sandbox: document.getElementById('robot-qq-sandbox')?.checked === true
@@ -2783,6 +2864,7 @@ async function testOpenAIConnection() {
 
 // 保存工具配置（独立函数，用于MCP管理页面）
 async function saveToolsConfig() {
+    if (typeof requirePermission === 'function' && !requirePermission('config:write')) return;
     try {
         // 先保存当前页的状态到全局映射
         saveCurrentPageToolStates();
@@ -2997,7 +3079,12 @@ let currentEditingMCPName = null;
 // 拉取外部MCP列表数据（供轮询使用，返回 { servers, stats }）
 async function fetchExternalMCPs() {
     const response = await apiFetch('/api/external-mcp');
-    if (!response.ok) throw new Error('获取外部MCP列表失败');
+    if (!response.ok) {
+        if (typeof readApiError === 'function') {
+            throw new Error(await readApiError(response, '获取外部MCP列表失败'));
+        }
+        throw new Error('获取外部MCP列表失败');
+    }
     return response.json();
 }
 
@@ -3200,6 +3287,7 @@ function renderExternalMCPStats(stats) {
 
 // 显示添加外部MCP模态框
 function showAddExternalMCPModal() {
+    if (typeof requirePermission === 'function' && !requirePermission('mcp:write')) return;
     currentEditingMCPName = null;
     document.getElementById('external-mcp-modal-title').textContent = (typeof window.t === 'function' ? window.t('mcp.addExternalMCP') : '添加外部MCP');
     document.getElementById('external-mcp-json').value = '';
@@ -3309,6 +3397,7 @@ function loadExternalMCPExample() {
 
 // 保存外部MCP
 async function saveExternalMCP() {
+    if (typeof requirePermission === 'function' && !requirePermission('mcp:write')) return;
     const jsonTextarea = document.getElementById('external-mcp-json');
     const jsonStr = jsonTextarea.value.trim();
     const errorDiv = document.getElementById('external-mcp-json-error');
@@ -3660,3 +3749,6 @@ document.addEventListener('languagechange', function () {
         console.warn('languagechange MCP refresh failed', e);
     }
 });
+
+window.initSettingsCustomSelects = initSettingsCustomSelects;
+window.refreshSettingsCustomSelects = refreshSettingsCustomSelects;

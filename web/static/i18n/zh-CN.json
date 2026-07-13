@@ -37,6 +37,15 @@
     "language": "界面语言",
     "backToDashboard": "返回仪表盘",
     "userMenu": "用户菜单",
+    "userMenuFor": "用户菜单：{{name}}",
+    "currentUser": "当前用户",
+    "unknownUser": "未知用户",
+    "scopeAll": "全部资源",
+    "scopeAssigned": "指定资源",
+    "scopeOwn": "自己的资源",
+    "scopeUnknown": "资源范围未知",
+    "rolesCount": "{{count}} 个角色",
+    "permissionsCount": "{{count}} 项权限",
     "version": "当前版本",
     "toggleSidebar": "折叠/展开侧边栏"
   },
@@ -59,7 +68,9 @@
   "login": {
     "title": "登录 CyberStrikeAI",
     "titlePrefix": "登录",
-    "subtitle": "请输入配置中的访问密码",
+    "subtitle": "使用平台账号登录，默认管理员为 admin。",
+    "usernameLabel": "用户名",
+    "usernamePlaceholder": "admin",
     "passwordLabel": "密码",
     "passwordPlaceholder": "输入登录密码",
     "submit": "登录"
@@ -95,7 +106,8 @@
     "c2Tasks": "任务",
     "c2Payloads": "载荷",
     "c2Events": "事件",
-    "c2Profiles": "流量伪装"
+    "c2Profiles": "流量伪装",
+    "platformRbac": "平台权限"
   },
   "dashboard": {
     "title": "仪表盘",
@@ -434,6 +446,7 @@
     "noFactsForVulnerability": "该漏洞暂无关联事实，可在事实详情中「关联漏洞」或「生成漏洞草稿」建立链接",
     "promptChooseFactByIndex": "该漏洞关联 {{count}} 条事实，输入序号查看：\n{{lines}}",
     "enterProjectName": "请输入项目名称",
+    "writePermissionDenied": "当前账号仅有只读权限，无法创建或修改项目",
     "saveFailed": "保存失败",
     "invalidJson": "JSON 格式无效",
     "scopeNoteAuthorizedWebOnly": "仅授权 Web 应用层测试",
@@ -550,6 +563,8 @@
     "viewToolDetail": "查看详情",
     "collapseToolDetail": "收起",
     "liveTimelinePruned": "已收起前 {{count}} 条实时过程详情，任务完成后可按页查看完整记录",
+    "liveTimelinePrunedSingleRound": "主代理第 {{n}} 轮",
+    "liveTimelinePrunedRoundRange": "主代理第 {{from}}–{{to}} 轮",
     "toolExecutionsCount": "{{n}}次工具执行",
     "collapseToolExecutions": "收起工具执行",
     "noProcessDetail": "暂无过程详情（可能执行过快或未触发详细事件）",
@@ -800,6 +815,7 @@
     "running": "执行中...",
     "completed": "已完成",
     "execFailed": "执行失败",
+    "resultMissing": "结果记录缺失",
     "toolSucceeded": "成功",
     "toolFailed": "失败"
   },
@@ -1224,6 +1240,7 @@
       "robots": "机器人设置",
       "terminal": "终端",
       "security": "安全设置",
+      "rbac": "平台权限",
       "audit": "日志审计",
       "infocollect": "信息收集"
     },
@@ -1391,8 +1408,10 @@
   "auth": {
     "sessionExpired": "认证已过期，请重新登录",
     "unauthorized": "未授权访问",
+    "forbidden": "权限不足",
+    "requestFailed": "请求失败",
     "enterPassword": "请输入密码",
-    "loginFailedCheck": "登录失败，请检查密码",
+    "loginFailedCheck": "登录失败，请检查用户名或密码",
     "loginFailedRetry": "登录失败，请稍后重试",
     "loggedOut": "已退出登录"
   },
@@ -2629,29 +2648,43 @@
   },
   "settingsRobotsExtra": {
     "botCommandsTitle": "机器人命令说明",
-    "botCommandsEntryDesc": "查看机器人对话中可用的中英文命令，包括对话、角色、项目等常用操作。",
+    "botCommandsEntryDesc": "查看机器人对话中可用的中英文命令，包括身份鉴权、对话、角色、模式、项目和安全诊断。",
     "viewAllCommands": "查看全部命令",
     "botCommandsDesc": "在对话中可发送以下命令（支持中英文）：",
     "botCmdCategoryGeneral": "通用",
+    "botCmdCategoryIdentity": "身份与鉴权",
     "botCmdCategoryConversation": "对话",
     "botCmdCategoryRole": "角色",
+    "botCmdCategoryMode": "模式",
+    "botCmdCategoryDiagnostics": "诊断与安全",
     "botCmdCategoryProject": "项目",
     "botCmdHelp": "显示本帮助 | Show this help",
+    "botCmdIdentity": "显示平台发送者、鉴权模式及当前实际 RBAC 身份 | Show effective identity",
+    "botCmdBindUser": "绑定当前平台账号到 RBAC 用户（仅逐用户绑定模式） | Bind RBAC user",
+    "botCmdUnbindUser": "解除当前平台账号绑定（仅逐用户绑定模式，需确认） | Unbind RBAC user",
+    "botAuthHint": "专用服务账号模式不接受“绑定/解绑”命令，仅允许机器人配置中白名单内的发送者。",
     "botCmdList": "列出所有对话标题与 ID | List conversations",
     "botCmdSwitch": "指定对话继续 | Switch to conversation",
     "botCmdNew": "开启新对话 | Start new conversation",
     "botCmdClear": "清空当前上下文 | Clear context",
-    "botCmdCurrent": "显示当前对话、角色与项目 | Show current conversation",
+    "botCmdStatus": "汇总当前对话、模式、角色与项目 | Show current status",
+    "botCmdTask": "查看当前任务状态与运行时长 | Show current task",
+    "botCmdRename": "修改当前对话标题 | Rename conversation",
+    "botCmdPermissions": "查看当前业务权限 | Show effective permissions",
+    "botCmdDoctor": "检查关键配置状态 | Check configuration status",
+    "botCmdConfirmation": "确认或取消高风险操作 | Confirm or cancel risky action",
     "botCmdStop": "中断当前任务 | Stop running task",
     "botCmdRoles": "列出所有可用角色 | List roles",
     "botCmdRole": "切换当前角色 | Switch role",
-    "botCmdDelete": "删除指定对话 | Delete conversation",
+    "botCmdModes": "列出对话模式与当前选择 | List conversation modes",
+    "botCmdMode": "切换对话模式 | Switch conversation mode",
+    "botCmdDelete": "删除指定对话（需确认） | Delete conversation",
     "botCmdVersion": "显示当前版本号 | Show version",
     "botCmdProjects": "列出所有项目 | List projects",
     "botCmdNewProject": "创建项目并绑定当前对话 | Create & bind project",
     "botCmdBindProject": "将当前对话绑定到项目 | Bind conversation",
     "botCmdUnbindProject": "解除当前对话的项目绑定 | Unbind project",
-    "botCommandsFooter": "除以上命令外，直接输入内容将发送给 AI 进行渗透测试/安全分析。Otherwise, send any text for AI penetration testing / security analysis."
+    "botCommandsFooter": "除以上命令外，直接输入内容将按绑定用户或服务账号的实时 RBAC 权限发送给 AI。Otherwise, text is sent to AI under the effective RBAC identity."
   },
   "mcpDetailModal": {
     "title": "工具调用详情",
@@ -3454,6 +3487,7 @@
       "paginationLast": "末页"
     },
     "payloads": {
+      "386": "386",
       "title": "Payload 生成",
       "oneliner": "单行 Payload",
       "build": "编译 Beacon",
@@ -3473,7 +3507,6 @@
       "darwin": "macOS",
       "amd64": "AMD64",
       "arm64": "ARM64",
-      "386": "386",
       "arm": "ARM",
       "onelinerDesc": "快速生成可在目标机直接执行的反弹命令，支持 Bash / Python / PowerShell / Curl",
       "buildDesc": "交叉编译多平台完整 Beacon 可执行文件，支持 Linux / Windows / macOS",
@@ -3555,6 +3588,354 @@
       "toastDeleted": "Profile 已删除",
       "confirmDelete": "确定删除此 Profile？",
       "submitCreate": "创建"
+    }
+  },
+  "rbac": {
+    "title": "平台权限",
+    "pageSubtitle": "统一管理成员、角色和可访问的数据范围。",
+    "createUser": "添加成员",
+    "memberManagement": "成员管理",
+    "memberManagementHint": "为成员分配角色与数据范围",
+    "roleManagement": "角色管理",
+    "roleManagementHint": "定义权限集合与默认可见范围",
+    "users": "用户",
+    "usersHint": "按账号选择后管理角色与资源范围。",
+    "searchUsers": "搜索用户名或显示名称",
+    "metricUsers": "账号",
+    "metricEnabled": "启用",
+    "metricRoles": "角色",
+    "metricAssignments": "资源授权",
+    "metricUsersPill": "个账号",
+    "metricEnabledPill": "个启用账号",
+    "metricRolesPill": "个角色",
+    "metricAssignmentsPill": "项授权",
+    "selectUser": "选择用户",
+    "selectUserHint": "选择一个平台用户后编辑角色、状态与资源授权。",
+    "createRole": "新建角色",
+    "tabRoles": "角色权限",
+    "tabAssignments": "资源授权",
+    "tabAudit": "变更记录",
+    "roleMembership": "角色成员关系",
+    "roleMembershipHint": "角色决定能做什么，资源范围决定能看到哪些数据。",
+    "unsavedChanges": "有未保存的变更",
+    "saveRoleChanges": "保存角色变更",
+    "resourceType": "资源类型",
+    "resourceId": "资源 ID",
+    "resourceIdPlaceholder": "输入资源 ID；多个 ID 用逗号分隔",
+    "searchResource": "搜索真实资源",
+    "searchResourcePlaceholder": "按名称或 ID 搜索",
+    "assignSelected": "授权所选资源",
+    "advancedAssignment": "高级：直接输入资源 ID",
+    "advancedAssignmentHint": "适用于从日志或 API 复制的已知 ID，提交时仍会验证资源是否存在。",
+    "availableResources": "可授权资源",
+    "availableResourcesHint": "勾选当前页资源，可跨页累计选择",
+    "currentAssignments": "当前单独授权",
+    "allResourceTypes": "全部类型",
+    "searchAssignments": "搜索已授权资源名称或 ID",
+    "items": "项",
+    "assignmentHelp": "仅“指定资源”范围的角色需要单独授权。项目授权会覆盖该项目下的对话和漏洞。",
+    "assignResource": "授权",
+    "roleCatalog": "角色目录",
+    "roleCatalogHint": "先定义角色的操作权限与资源范围，再分配给成员。",
+    "searchRoles": "搜索角色或权限",
+    "filterRoles": "筛选角色",
+    "userModalTitle": "平台用户",
+    "username": "用户名",
+    "displayName": "显示名称",
+    "password": "密码",
+    "passwordPlaceholder": "编辑时留空表示不修改",
+    "enabled": "启用账号",
+    "roles": "角色",
+    "roleModalTitle": "平台角色",
+    "roleName": "角色名称",
+    "description": "描述",
+    "scope": "资源范围",
+    "permissions": "权限",
+    "searchPermissions": "搜索权限，例如 project:read",
+    "selectVisible": "选择可见",
+    "clearVisible": "清空可见",
+    "deleteUserConfirm": "确认删除该平台用户？该操作会立即吊销该用户会话。",
+    "deleteBuiltinUser": "内置管理员不能删除",
+    "deleteRoleConfirm": "确认删除该平台角色？",
+    "scopeHint": "资源范围与操作权限共同决定最终访问能力。",
+    "builtinAccount": "内置账号",
+    "statusEnabled": "启用",
+    "statusDisabled": "停用",
+    "noRoleAssigned": "未分配角色",
+    "noExplicitGrant": "无单独授权",
+    "notConfigured": "未设置",
+    "noRoleDescription": "暂无角色说明",
+    "noDescription": "无描述",
+    "systemBuiltin": "系统内置",
+    "customRole": "自定义",
+    "operationPermissions": "操作权限",
+    "assignedMembers": "已分配成员",
+    "viewPermissions": "查看权限",
+    "effectivePermissions": "有效权限",
+    "effectiveScope": "有效资源范围",
+    "revoke": "撤销",
+    "retry": "重试",
+    "alreadyAssigned": "已授权",
+    "loadingResources": "正在加载真实资源…",
+    "viewSystemRole": "查看系统角色",
+    "editRole": "编辑角色",
+    "resourceCount": "{{count}} 项资源",
+    "permissionCount": "{{count}} 项权限",
+    "userCount": "{{count}} 个用户",
+    "confirmDiscardSwitchUser": "当前角色变更尚未保存，确定放弃并切换成员吗？",
+    "confirmDiscardEditUser": "当前角色变更尚未保存，确定放弃并编辑成员资料吗？",
+    "confirmDiscardSwitchTab": "当前角色变更尚未保存，确定放弃并切换标签吗？",
+    "confirmDiscardResourceType": "切换资源类型将清空当前选择，确定继续吗？",
+    "pendingGrants": "待授权",
+    "clearSelection": "清空选择",
+    "confirmGrant": "确认授权",
+    "removePending": "移除",
+    "selectedCount": "已选 {{count}} 项",
+    "noRoleNoticeTitle": "尚未分配角色",
+    "noRoleNoticeHint": "请先分配角色，再配置资源授权。无角色时仅可访问本人创建的数据，且大部分功能不可用。",
+    "assignRolesNow": "去分配角色",
+    "viewPermissionsDetail": "查看明细",
+    "hidePermissions": "收起明细",
+    "effectivePermissionsDetail": "有效权限明细",
+    "editUserRolesHint": "角色请在成员详情页的「角色权限」标签中统一管理。",
+    "auditTitle": "权限变更记录",
+    "auditHint": "展示该成员相关的平台权限操作审计。",
+    "unknownActor": "未知操作者",
+    "metricUserContext": "当前成员：{{name}} · {{roles}} 个角色 · {{grants}} 项授权",
+    "deleteUserConfirmDetailed": "确认删除成员 {{name}}（@{{username}}）？\n\n将立即吊销其会话，并清除 {{roles}} 个角色绑定与 {{grants}} 项资源授权。",
+    "auditActions": {
+      "create_user": "创建平台用户",
+      "update_user": "更新平台用户",
+      "delete_user": "删除平台用户",
+      "create_role": "创建平台角色",
+      "update_role": "更新平台角色",
+      "delete_role": "删除平台角色",
+      "assign_resource": "授权资源访问",
+      "delete_resource_assignment": "撤销资源授权"
+    },
+    "copyId": "复制 ID",
+    "copiedId": "已复制",
+    "resourceIdLabel": "ID",
+    "resourceDetailProject": "所属项目 {{id}}",
+    "pagination": {
+      "previous": "上一页",
+      "next": "下一页",
+      "resourcePage": "第 {{page}} 页",
+      "pageSummary": "第 {{page}} / {{pages}} 页 · 共 {{total}} 项",
+      "emptySummary": "共 0 项"
+    },
+    "resourceTypes": {
+      "project": "项目",
+      "conversation": "对话",
+      "vulnerability": "漏洞",
+      "webshell": "WebShell 连接",
+      "batch_task": "批量任务",
+      "c2_listener": "C2 监听器"
+    },
+    "scopes": {
+      "all": {
+        "label": "全部资源",
+        "hint": "可访问平台内全部数据",
+        "option": "全部资源 — 可访问平台内所有数据"
+      },
+      "assigned": {
+        "label": "指定资源",
+        "hint": "仅访问管理员明确授权的数据",
+        "option": "指定资源 — 仅访问管理员授权的数据"
+      },
+      "own": {
+        "label": "本人创建",
+        "hint": "仅访问自己创建的数据",
+        "option": "本人创建 — 仅访问自己创建的数据"
+      }
+    },
+    "systemRoles": {
+      "admin": { "name": "管理员", "description": "全局管理权限" },
+      "operator": { "name": "操作员", "description": "可执行日常安全工作流，不能管理账号与核心配置" },
+      "auditor": { "name": "审计员", "description": "只读查看审计、监控与资产" },
+      "viewer": { "name": "只读用户", "description": "只读查看被授权资源" }
+    },
+    "empty": {
+      "noMatchingUsers": "没有匹配的成员",
+      "noUsers": "还没有平台成员",
+      "tryAnotherKeyword": "试试其他关键词",
+      "addFirstUser": "点击右上角“添加成员”开始配置",
+      "noMatchingRoles": "没有匹配的角色",
+      "adjustRoleSearch": "调整搜索条件或新建自定义角色",
+      "noRoles": "暂无角色",
+      "selectUserFirst": "请先选择用户",
+      "noAssignments": "暂无资源授权",
+      "addAssignmentHint": "在左侧勾选资源，或使用上方「确认授权」按钮",
+      "noMatchingAssignments": "没有匹配的授权",
+      "adjustAssignmentFilter": "调整资源类型或搜索条件",
+      "noMatchingResources": "没有匹配的真实资源",
+      "noMatchingPermissions": "没有匹配的权限",
+      "noEffectivePermissions": "暂无有效权限",
+      "assignRoleFirst": "分配角色后即可查看权限明细",
+      "noAuditLogs": "暂无变更记录",
+      "noAuditLogsHint": "该成员的角色与授权变更会显示在这里"
+    },
+    "messages": {
+      "roleChangesSaved": "角色变更已保存，权限立即生效",
+      "grantPartial": "新增 {{created}} 项授权，{{skipped}} 项已存在或重复",
+      "grantSuccess": "已授权 {{count}} 项{{resource}}"
+    },
+    "errors": {
+      "loadFailed": "加载失败",
+      "loadDataFailed": "无法加载权限数据",
+      "loadResourcesFailed": "加载资源失败",
+      "saveFailed": "保存失败",
+      "saveUserFailed": "保存用户失败",
+      "saveRoleFailed": "保存角色失败",
+      "deleteFailed": "删除失败",
+      "deleteUserFailed": "删除用户失败",
+      "deleteRoleFailed": "删除角色失败",
+      "enterResourceId": "请输入至少一个资源 ID",
+      "tooManyResources": "一次最多授权 100 个资源",
+      "batchGrantFailed": "批量授权失败",
+      "grantFailed": "授权失败",
+      "revokeFailed": "撤销失败",
+      "loadAuditFailed": "加载审计记录失败"
+    },
+    "permissionModules": {
+      "agent": "智能体",
+      "agents": "智能体定义",
+      "attackchain": "攻击链",
+      "audit": "审计",
+      "auth": "账户安全",
+      "c2": "C2",
+      "chat": "对话",
+      "config": "系统配置",
+      "dashboard": "仪表盘",
+      "files": "文件",
+      "fofa": "FOFA",
+      "group": "对话分组",
+      "hitl": "人机协同",
+      "knowledge": "知识库",
+      "mcp": "MCP",
+      "monitor": "执行监控",
+      "notification": "通知",
+      "openapi": "OpenAPI",
+      "project": "项目",
+      "rbac": "平台权限",
+      "robot": "机器人",
+      "roles": "测试角色",
+      "skills": "Skills",
+      "tasks": "任务",
+      "terminal": "终端",
+      "vulnerability": "漏洞",
+      "webshell": "WebShell",
+      "workflow": "工作流"
+    },
+    "permissionDescriptions": {
+      "auth": { "self": "管理自己的会话和密码" },
+      "dashboard": { "read": "查看仪表盘汇总" },
+      "chat": {
+        "read": "查看对话",
+        "write": "创建和更新对话",
+        "delete": "删除对话和消息轮次"
+      },
+      "agent": { "execute": "运行 AI 智能体和工作流" },
+      "hitl": {
+        "read": "查看人机协同队列和日志",
+        "write": "审批、驳回和配置人机协同"
+      },
+      "tasks": {
+        "read": "查看任务队列",
+        "write": "创建和运行任务队列",
+        "delete": "删除任务队列"
+      },
+      "project": {
+        "read": "查看项目和项目事实",
+        "write": "创建和更新项目及项目事实",
+        "delete": "删除项目和项目事实"
+      },
+      "vulnerability": {
+        "read": "查看漏洞",
+        "write": "创建和更新漏洞",
+        "delete": "删除漏洞"
+      },
+      "webshell": {
+        "read": "查看 WebShell 连接",
+        "write": "管理和使用 WebShell 连接",
+        "delete": "删除 WebShell 连接"
+      },
+      "c2": {
+        "read": "查看 C2 监听器、会话、任务、事件和配置",
+        "write": "操作 C2 监听器、会话、任务、载荷、文件和配置",
+        "delete": "删除 C2 对象"
+      },
+      "mcp": {
+        "read": "查看 MCP 状态和外部 MCP 配置",
+        "write": "管理外部 MCP 服务并调用 MCP 端点"
+      },
+      "knowledge": {
+        "read": "查看知识库和检索日志",
+        "write": "创建、更新、索引和扫描知识库",
+        "delete": "删除知识条目和检索日志"
+      },
+      "skills": {
+        "read": "查看 Skills 和统计信息",
+        "write": "创建和更新 Skills",
+        "delete": "删除 Skills 和统计信息"
+      },
+      "agents": {
+        "read": "查看 Markdown 智能体",
+        "write": "创建和更新 Markdown 智能体",
+        "delete": "删除 Markdown 智能体"
+      },
+      "roles": {
+        "read": "查看 AI 测试角色",
+        "write": "创建和更新 AI 测试角色",
+        "delete": "删除 AI 测试角色"
+      },
+      "workflow": {
+        "read": "查看工作流定义和运行记录",
+        "write": "创建、更新、验证、运行和恢复工作流",
+        "delete": "删除工作流"
+      },
+      "config": {
+        "read": "查看系统配置",
+        "write": "更新并应用系统配置"
+      },
+      "terminal": { "execute": "执行终端命令" },
+      "audit": {
+        "read": "查看和导出审计日志",
+        "delete": "删除审计日志"
+      },
+      "rbac": {
+        "read": "查看用户、平台角色、权限和授权关系",
+        "write": "管理用户、平台角色、权限和授权关系"
+      },
+      "notification": {
+        "read": "查看通知",
+        "write": "将通知标记为已读"
+      },
+      "robot": {
+        "read": "查看机器人绑定状态",
+        "write": "管理机器人绑定并测试回调"
+      },
+      "files": {
+        "read": "查看对话上传文件",
+        "write": "上传、编辑和重命名对话文件",
+        "delete": "删除对话文件"
+      },
+      "attackchain": {
+        "read": "查看攻击链",
+        "write": "重新生成攻击链"
+      },
+      "fofa": { "execute": "执行 FOFA 搜索和查询解析" },
+      "openapi": { "read": "读取 OpenAPI 聚合结果" },
+      "group": {
+        "read": "查看对话分组",
+        "write": "创建和更新对话分组",
+        "delete": "删除对话分组"
+      },
+      "monitor": {
+        "read": "查看执行监控",
+        "write": "取消监控中的执行",
+        "delete": "删除执行监控记录"
+      }
     }
   }
 }

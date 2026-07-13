@@ -8,6 +8,7 @@ import (
 
 	"cyberstrike-ai/internal/audit"
 	"cyberstrike-ai/internal/database"
+	"cyberstrike-ai/internal/security"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -69,11 +70,22 @@ func (h *ConversationHandler) CreateConversation(c *gin.Context) {
 
 	meta := audit.ConversationCreateMetaFromGin(c, "api")
 	meta.ProjectID = strings.TrimSpace(req.ProjectID)
+	if !h.conversationProjectAllowed(c, meta.ProjectID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权访问目标项目"})
+		return
+	}
 	conv, err := h.db.CreateConversation(title, meta)
 	if err != nil {
 		h.logger.Error("创建对话失败", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	if session, ok := security.CurrentSession(c); ok {
+		_ = h.db.SetResourceOwner("conversation", conv.ID, session.UserID)
+		_ = h.db.AssignResourceToUser(session.UserID, "conversation", conv.ID)
+		if conv.ProjectID != "" {
+			_ = h.db.AssignResourceToUser(session.UserID, "project", conv.ProjectID)
+		}
 	}
 
 	c.JSON(http.StatusOK, conv)
@@ -91,11 +103,28 @@ func (h *ConversationHandler) SetConversationProject(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "对话不存在"})
 		return
 	}
-	if err := h.db.SetConversationProjectID(id, req.ProjectID); err != nil {
+	projectID := strings.TrimSpace(req.ProjectID)
+	if !h.conversationProjectAllowed(c, projectID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权访问目标项目"})
+		return
+	}
+	if err := h.db.SetConversationProjectID(id, projectID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "projectId": strings.TrimSpace(req.ProjectID)})
+	c.JSON(http.StatusOK, gin.H{"success": true, "projectId": projectID})
+}
+
+func (h *ConversationHandler) conversationProjectAllowed(c *gin.Context, projectID string) bool {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return true
+	}
+	session, ok := security.CurrentSession(c)
+	if !ok {
+		return false
+	}
+	return h.db.UserCanAccessResource(session.UserID, session.Scope, "project", projectID)
 }
 
 // ListConversations 列出对话
@@ -118,19 +147,20 @@ func (h *ConversationHandler) ListConversations(c *gin.Context) {
 	excludeGrouped := strings.TrimSpace(search) == "" && projectID == "" &&
 		(c.Query("exclude_grouped") == "true" || c.Query("exclude_grouped") == "1")
 	sortBy := strings.TrimSpace(c.Query("sort_by"))
+	session, _ := security.CurrentSession(c)
 
 	var conversations []*database.Conversation
 	var total int
 	var err error
 	if excludeGrouped {
-		conversations, err = h.db.ListUngroupedConversations(limit, offset, sortBy, projectID)
+		conversations, err = h.db.ListUngroupedConversationsForAccess(limit, offset, sortBy, projectID, session.UserID, session.Scope)
 		if err == nil {
-			total, err = h.db.CountUngroupedConversations(projectID)
+			total, err = h.db.CountUngroupedConversationsForAccess(projectID, session.UserID, session.Scope)
 		}
 	} else {
-		conversations, err = h.db.ListConversations(limit, offset, search, sortBy, projectID)
+		conversations, err = h.db.ListConversationsForAccess(limit, offset, search, sortBy, projectID, session.UserID, session.Scope)
 		if err == nil {
-			total, err = h.db.CountConversations(search, projectID)
+			total, err = h.db.CountConversationsForAccess(search, projectID, session.UserID, session.Scope)
 		}
 	}
 	if err != nil {
@@ -266,8 +296,20 @@ func (h *ConversationHandler) GetMessageProcessDetails(c *gin.Context) {
 	}
 	details = database.DedupeConsecutiveProcessDetails(details)
 	out := processDetailsToJSON(h.logger, details, false)
+	// A page may end between tool_call and tool_result. Return the full-history
+	// execution summary so the UI can render terminal status without pretending
+	// that an unloaded result is still running.
+	summary, summaryErr := h.db.GetProcessDetailsSummary(messageID)
+	if summaryErr != nil {
+		h.logger.Warn("获取分页工具执行状态失败", zap.Error(summaryErr), zap.String("messageID", messageID))
+	}
+	var toolExecutions []database.ProcessDetailsToolExecution
+	if summary != nil {
+		toolExecutions = summary.ToolExecutions
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"processDetails": out,
+		"toolExecutions": toolExecutions,
 		"total":          total,
 		"offset":         offset,
 		"limit":          limit,

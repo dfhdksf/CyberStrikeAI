@@ -131,6 +131,8 @@ func buildPlanExecuteExecutorHandlers(ctx context.Context, a *PlanExecuteRootArg
 			phase:          "plan_execute_executor",
 			summarization:  sumMw,
 			modelName:      a.ModelName,
+			maxTotalTokens: a.AppCfg.OpenAI.MaxTotalTokens,
+			toolMaxBytes:   toolMaxBytesFromMW(a.MwCfg),
 			conversationID: a.ConversationID,
 			trace:          a.ModelFacingTrace,
 		})

@@ -126,6 +126,7 @@ CyberStrikeAI 基于 Go 构建，为 AI 原生安全运营提供完整底座：1
 - 🔗 攻击链智能分析，支持图谱视图、风险打分、项目事实沉淀与步骤回放
 - 🧑‍⚖️ 人机协同治理，支持审批模式、免审批白名单、审计 Agent 复核与可追溯决策
 - 🔒 Web 登录保护、审计日志、SQLite 持久化与行动证据留存
+- 🔐 **平台 RBAC**：支持多用户、系统/自定义角色、逐权限 Scope（`all` / `assigned` / `own`）、资源归属与显式授权，并统一约束 API、Agent、MCP、后台任务和机器人；详见 [RBAC 权限管理](docs/zh-CN/rbac.md)
 - 📚 知识库（RAG）：**Eino MultiQuery** 查询改写 + 多路向量检索 + **HTTP 精排**（DashScope `gte-rerank` / Cohere 兼容）+ 后处理（去重、预算）；索引侧为 **Eino Compose** 流水线
 - 📁 对话分组管理：支持分组创建、置顶、重命名、删除等操作
 - 📂 **项目管理**：共享事实（黑板）跨会话沉淀认知，`upsert_project_fact` + `links` 串联攻击路径；聊天攻击链与项目事实图可视化
@@ -210,7 +211,7 @@ chmod +x run.sh && ./run.sh
        model: "gpt-4o"  # 或 deepseek-chat, claude-3-opus 等
      ```
    - 或启动前直接编辑 `config.yaml` 文件
-2. **登录系统** - 使用控制台显示的自动生成密码（或在 `config.yaml` 中设置 `auth.password`）
+2. **登录系统** - 首次启动时控制台会显示自动生成的 `admin` 初始密码；也可在「平台权限 → 用户管理」中创建账号
 3. **安装安全工具（可选）** - 按需安装 `tools/` 目录中的工具；未安装的工具在执行时会自动跳过或改用替代方案。常用示例：
 
    **macOS（Homebrew）：**
@@ -278,7 +279,7 @@ go build -o cyberstrike-ai cmd/server/main.go
 
 ### 默认安全措施
 - 设置面板内置必填校验，防止漏配 API Key/Base URL/模型。
-- `auth.password` 为空时自动生成 24 位强口令并写回 `config.yaml`。
+- 首次启动且无 RBAC 用户时，自动生成 24 位 `admin` 初始密码并在控制台输出（仅存于数据库，不再写入 `config.yaml`）。
 - 所有 API（除登录外）都需携带 Bearer Token，统一鉴权中间件拦截。
 - 每个工具执行都带有超时、日志和错误隔离。
 
@@ -534,7 +535,6 @@ CyberStrikeAI 支持通过三种传输模式连接外部 MCP 服务器：
 
 ```yaml
 auth:
-  password: "change-me"
   session_duration_hours: 12
 server:
   host: "0.0.0.0"
@@ -647,10 +647,11 @@ enabled: true
 - [API Recipes](docs/zh-CN/api-recipes.md)：登录、Agent、流式、多代理、上传、漏洞、知识库和审计导出调用示例。
 - [配置参考](docs/zh-CN/configuration.md)：`config.yaml` 各配置段、推荐值和修改建议。
 - [安全模型](docs/zh-CN/security-model.md)：认证、工具执行、HITL、审计、C2/WebShell 和数据安全边界。
+- [RBAC 权限管理](docs/zh-CN/rbac.md)：平台用户、系统/自定义角色、权限目录、逐权限 Scope、资源授权、Agent/MCP/机器人边界与 API 示例。
 - [API 参考](docs/zh-CN/api-reference.md)：OpenAPI、认证、Agent、项目、知识库、C2、WebShell 等接口入口。
 - [多代理模式（Eino）](docs/zh-CN/MULTI_AGENT_EINO.md)：**Deep**、**Plan-Execute**、**Supervisor**、`agents/*.md`、`eino_skills` / `eino_middleware`、接口与流式说明。
 - [图编排使用说明](docs/zh-CN/workflow-graph.md)：可视化流程搭建、节点配置、`previous` / `outputs` 变量传参与角色绑定。
-- [机器人使用说明](docs/zh-CN/robot.md)：个人微信、企业微信、钉钉、飞书、Telegram、Slack、Discord、QQ 机器人的配置、命令与排查。
+- [机器人使用说明](docs/zh-CN/robot.md)：各平台接入、RBAC 逐用户绑定/服务账号模式、发送者白名单、命令、验证与排查。
 - [人机协同最佳实践](docs/zh-CN/hitl-best-practices.md)：审批方模式、白名单、审计 Agent 提示词策略与独立小模型配置。
 
 ## 项目结构

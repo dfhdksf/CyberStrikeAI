@@ -7,78 +7,12 @@ import (
 	"testing"
 )
 
-func TestPersistAuthPasswordQuotesYAMLSpecialCharacters(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.yaml")
-	initial := strings.Join([]string{
-		"server:",
-		"  host: 0.0.0.0",
-		"auth:",
-		"  password: old-password # Web 登录密码",
-		"  session_duration_hours: 12",
-		"log:",
-		"  level: info",
-		"",
-	}, "\n")
-	if err := os.WriteFile(path, []byte(initial), 0644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	want := `@abc:def # still password`
-	if err := PersistAuthPassword(path, want); err != nil {
-		t.Fatalf("PersistAuthPassword: %v", err)
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read config: %v", err)
-	}
-	if !strings.Contains(string(data), `password: "@abc:def # still password" # Web 登录密码`) {
-		t.Fatalf("password was not safely quoted or comment was not preserved:\n%s", data)
-	}
-
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load after PersistAuthPassword: %v", err)
-	}
-	if cfg.Auth.Password != want {
-		t.Fatalf("Auth.Password = %q, want %q", cfg.Auth.Password, want)
-	}
-}
-
-func TestPersistAuthPasswordDoesNotTreatQuotedHashAsComment(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.yaml")
-	initial := strings.Join([]string{
-		"auth:",
-		`  password: "old#password"`,
-		"  session_duration_hours: 12",
-		"",
-	}, "\n")
-	if err := os.WriteFile(path, []byte(initial), 0644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	if err := PersistAuthPassword(path, "new-password"); err != nil {
-		t.Fatalf("PersistAuthPassword: %v", err)
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read config: %v", err)
-	}
-	if strings.Contains(string(data), "#password") {
-		t.Fatalf("old quoted password fragment was incorrectly preserved as a comment:\n%s", data)
-	}
-}
-
-func TestEnsureLocalConfigCreatesFromExampleWithGeneratedPassword(t *testing.T) {
+func TestEnsureLocalConfigCreatesFromExample(t *testing.T) {
 	dir := t.TempDir()
 	examplePath := filepath.Join(dir, "config.example.yaml")
 	configPath := filepath.Join(dir, "config.yaml")
 
 	example := []byte(`auth:
-  password: "change-me-use-a-long-random-password"
   session_duration_hours: 12
 server:
   host: 127.0.0.1
@@ -95,9 +29,6 @@ server:
 	if !result.Created {
 		t.Fatal("Created = false, want true")
 	}
-	if result.GeneratedPassword == "" {
-		t.Fatal("GeneratedPassword is empty")
-	}
 	if result.ExamplePath != examplePath {
 		t.Fatalf("ExamplePath = %q, want %q", result.ExamplePath, examplePath)
 	}
@@ -106,11 +37,8 @@ server:
 	if err != nil {
 		t.Fatalf("Load generated config: %v", err)
 	}
-	if cfg.Auth.Password == "change-me-use-a-long-random-password" {
-		t.Fatal("auth.password still contains the template placeholder")
-	}
-	if cfg.Auth.Password != result.GeneratedPassword {
-		t.Fatalf("Auth.Password = %q, want generated password %q", cfg.Auth.Password, result.GeneratedPassword)
+	if cfg.Auth.SessionDurationHours != 12 {
+		t.Fatalf("SessionDurationHours = %d, want 12", cfg.Auth.SessionDurationHours)
 	}
 
 	second, err := EnsureLocalConfig(configPath)
@@ -119,6 +47,31 @@ server:
 	}
 	if second.Created {
 		t.Fatal("Created = true for existing config, want false")
+	}
+}
+
+func TestLoadIgnoresLegacyAuthPasswordField(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	initial := strings.Join([]string{
+		"auth:",
+		`  password: "legacy-password"`,
+		"  session_duration_hours: 12",
+		"server:",
+		"  host: 127.0.0.1",
+		"  port: 8080",
+		"",
+	}, "\n")
+	if err := os.WriteFile(path, []byte(initial), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Auth.SessionDurationHours != 12 {
+		t.Fatalf("SessionDurationHours = %d, want 12", cfg.Auth.SessionDurationHours)
 	}
 }
 
@@ -160,6 +113,17 @@ func TestSummarizationUserIntentLedgerRunesEffective(t *testing.T) {
 	}
 	if got := custom.SummarizationUserIntentLedgerEntryMaxRunesEffective(); got != 2345 {
 		t.Fatalf("custom ledger entry max runes = %d", got)
+	}
+}
+
+func TestSummarizationOutputReserveTokensEffective(t *testing.T) {
+	var zero MultiAgentEinoMiddlewareConfig
+	if got := zero.SummarizationOutputReserveTokensEffective(); got != DefaultSummarizationOutputReserveTokens {
+		t.Fatalf("default output reserve = %d, want %d", got, DefaultSummarizationOutputReserveTokens)
+	}
+	custom := MultiAgentEinoMiddlewareConfig{SummarizationOutputReserveTokens: 4096}
+	if got := custom.SummarizationOutputReserveTokensEffective(); got != 4096 {
+		t.Fatalf("custom output reserve = %d", got)
 	}
 }
 

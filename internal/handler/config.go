@@ -16,6 +16,7 @@ import (
 	"cyberstrike-ai/internal/agents"
 	"cyberstrike-ai/internal/audit"
 	"cyberstrike-ai/internal/config"
+	"cyberstrike-ai/internal/database"
 	"cyberstrike-ai/internal/knowledge"
 	"cyberstrike-ai/internal/mcp"
 	"cyberstrike-ai/internal/mcp/builtin"
@@ -89,9 +90,30 @@ type ConfigHandler struct {
 	appUpdater                 AppUpdater                 // App更新器（可选）
 	robotRestarter             RobotRestarter             // 机器人连接重启器（可选），ApplyConfig 时重启钉钉/飞书
 	audit                      *audit.Service
+	db                         *database.DB
 	logger                     *zap.Logger
 	mu                         sync.RWMutex
 	lastEmbeddingConfig        *config.EmbeddingConfig // 上一次的嵌入模型配置（用于检测变更）
+}
+
+func (h *ConfigHandler) SetDB(db *database.DB) {
+	h.db = db
+}
+
+func (h *ConfigHandler) validateRobotServiceAccounts(robots config.RobotsConfig) error {
+	if h.db == nil {
+		return fmt.Errorf("RBAC 服务不可用，无法校验机器人服务账号")
+	}
+	for platform, userID := range robots.ServiceAccountUserIDs() {
+		user, err := h.db.GetRBACUserByID(userID)
+		if err != nil {
+			return fmt.Errorf("robots.%s.auth.service_user_id 对应用户不存在", platform)
+		}
+		if !user.Enabled {
+			return fmt.Errorf("robots.%s.auth.service_user_id 对应用户已禁用", platform)
+		}
+	}
+	return nil
 }
 
 // AttackChainUpdater 攻击链处理器更新接口
@@ -827,6 +849,14 @@ func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if err := config.ValidateRobotsAuthorization(*req.Robots); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := h.validateRobotServiceAccounts(*req.Robots); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		h.config.Robots = *req.Robots
 		h.logger.Info("更新机器人配置",
 			zap.Bool("wechat_enabled", h.config.Robots.Wechat.Enabled),
@@ -1332,7 +1362,7 @@ func (h *ConfigHandler) ApplyConfig(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "初始化知识库失败: " + err.Error()})
 			return
 		}
-		h.logger.Info("知识库动态初始化完成，工具已注册")
+		h.logger.Debug("知识库动态初始化完成，工具已注册")
 	}
 
 	// 检查嵌入模型配置是否变更（需要在锁外执行，避免阻塞）
@@ -1411,10 +1441,10 @@ func (h *ConfigHandler) ApplyConfig(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "重新加载工具配置失败: " + err.Error()})
 		return
 	}
-	h.logger.Info("已从 tools 目录重新加载工具配置", zap.Int("tools_count", len(h.config.Security.Tools)))
+	h.logger.Debug("已从 tools 目录重新加载工具配置", zap.Int("tools_count", len(h.config.Security.Tools)))
 
 	// 重新注册工具（根据新的启用状态）
-	h.logger.Info("重新注册工具")
+	h.logger.Debug("重新注册工具")
 
 	// 清空MCP服务器中的工具
 	h.mcpServer.ClearTools()

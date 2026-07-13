@@ -82,7 +82,7 @@ func RunEinoSingleChatModelAgent(
 	}
 
 	toolInvokeNotify := einomcp.NewToolInvokeNotifyHolder()
-	einoExecBegin, einoExecFinish := newEinoExecuteMonitorCallbacks(ag, recorder)
+	einoExecBegin, einoExecFinish := newEinoExecuteMonitorCallbacks(ctx, ag, recorder)
 	mainDefs := ag.ToolsForRole(roleTools)
 	mainTools, err := einomcp.ToolsFromDefinitions(ag, holder, mainDefs, recorder, nil, toolInvokeNotify, einoSingleAgentName)
 	if err != nil {
@@ -150,6 +150,8 @@ func RunEinoSingleChatModelAgent(
 		phase:          "eino_single",
 		summarization:  mainSumMw,
 		modelName:      appCfg.OpenAI.Model,
+		maxTotalTokens: appCfg.OpenAI.MaxTotalTokens,
+		toolMaxBytes:   toolMaxBytesFromMW(&ma.EinoMiddleware),
 		conversationID: conversationID,
 		trace:          modelFacingTrace,
 	})
@@ -161,6 +163,7 @@ func RunEinoSingleChatModelAgent(
 			Tools:               mainToolsForCfg,
 			UnknownToolsHandler: einomcp.UnknownToolReminderHandler(),
 			ToolCallMiddlewares: []compose.ToolMiddleware{
+				localToolRBACMiddleware(),
 				hitlToolCallMiddleware(),
 				softRecoveryToolMiddleware(),
 			},
@@ -233,6 +236,9 @@ func RunEinoSingleChatModelAgent(
 		DA:                      chatAgent,
 		ModelFacingTrace:        modelFacingTrace,
 		EinoCallbacks:           &ma.EinoCallbacks,
+		MaxTotalTokens:          appCfg.OpenAI.MaxTotalTokens,
+		ToolMaxBytes:            toolMaxBytesFromMW(&ma.EinoMiddleware),
+		ModelName:               appCfg.OpenAI.Model,
 		EmptyResponseMessage: "(Eino ADK single-agent session completed but no assistant text was captured. Check process details or logs.) " +
 			"（Eino ADK 单代理会话已完成，但未捕获到助手文本输出。请查看过程详情或日志。）",
 	}, baseMsgs)

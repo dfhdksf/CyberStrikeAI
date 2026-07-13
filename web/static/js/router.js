@@ -81,7 +81,7 @@ function initRouter() {
         const hashParts = hash.split('?');
         let pageId = hashParts[0];
         if (pageId === 'c2') pageId = 'c2-listeners';
-        if (pageId && ['dashboard', 'chat', 'hitl', 'info-collect', 'projects', 'vulnerabilities', 'webshell', 'chat-files', 'mcp-monitor', 'mcp-management', 'knowledge-management', 'knowledge-retrieval-logs', 'roles-management', 'workflows', 'skills-monitor', 'skills-management', 'agents-management', 'settings', 'tasks', 'c2-listeners', 'c2-sessions', 'c2-tasks', 'c2-payloads', 'c2-events', 'c2-profiles'].includes(pageId)) {
+        if (pageId && ['dashboard', 'chat', 'hitl', 'info-collect', 'projects', 'vulnerabilities', 'webshell', 'chat-files', 'mcp-monitor', 'mcp-management', 'knowledge-management', 'knowledge-retrieval-logs', 'roles-management', 'platform-rbac', 'workflows', 'skills-monitor', 'skills-management', 'agents-management', 'settings', 'tasks', 'c2-listeners', 'c2-sessions', 'c2-tasks', 'c2-payloads', 'c2-events', 'c2-profiles'].includes(pageId)) {
             switchPage(pageId);
             if (pageId === 'chat') {
                 scheduleChatConversationFromHash(500);
@@ -120,6 +120,10 @@ function switchPage(pageId) {
         
         // 页面特定的初始化
         initPage(pageId);
+
+        if (typeof applyRBACToUI === 'function') {
+            applyRBACToUI(targetPage);
+        }
     }
 }
 window.switchPage = switchPage;
@@ -414,9 +418,11 @@ async function initPage(pageId) {
                     startExternalMcpPoll();
                 }
             };
-            // 先拉取配置（含 tool_search 常驻列表），再加载工具与外部 MCP
-            if (typeof loadConfig === 'function') {
-                loadConfig(false)
+            // 先拉取配置（含 tool_search 常驻列表），再加载工具与外部 MCP。
+            // 仅有 mcp:read 的用户无需拉全量 /api/config（需 config:read）。
+            const canLoadFullConfig = typeof hasPermission !== 'function' || hasPermission('config:read');
+            if (typeof loadConfig === 'function' && canLoadFullConfig) {
+                loadConfig(false, { silent: true })
                     .catch(err => {
                         console.warn('加载配置失败（将继续加载 MCP 列表）:', err);
                     })
@@ -470,6 +476,11 @@ async function initPage(pageId) {
                         renderRolesList();
                     }
                 });
+            }
+            break;
+        case 'platform-rbac':
+            if (typeof initPlatformRbacPage === 'function') {
+                initPlatformRbacPage();
             }
             break;
         case 'workflows':
@@ -538,7 +549,7 @@ document.addEventListener('DOMContentLoaded', function() {
         let pageId = hashParts[0];
         
         if (pageId === 'c2') pageId = 'c2-listeners';
-        if (pageId && ['dashboard', 'chat', 'hitl', 'info-collect', 'projects', 'tasks', 'workflows', 'vulnerabilities', 'webshell', 'chat-files', 'mcp-monitor', 'mcp-management', 'knowledge-management', 'knowledge-retrieval-logs', 'roles-management', 'skills-monitor', 'skills-management', 'agents-management', 'settings', 'c2-listeners', 'c2-sessions', 'c2-tasks', 'c2-payloads', 'c2-events', 'c2-profiles'].includes(pageId)) {
+        if (pageId && ['dashboard', 'chat', 'hitl', 'info-collect', 'projects', 'tasks', 'workflows', 'vulnerabilities', 'webshell', 'chat-files', 'mcp-monitor', 'mcp-management', 'knowledge-management', 'knowledge-retrieval-logs', 'roles-management', 'platform-rbac', 'skills-monitor', 'skills-management', 'agents-management', 'settings', 'c2-listeners', 'c2-sessions', 'c2-tasks', 'c2-payloads', 'c2-events', 'c2-profiles'].includes(pageId)) {
             switchPage(pageId);
             if (pageId === 'chat') {
                 scheduleChatConversationFromHash(200);

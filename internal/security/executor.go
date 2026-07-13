@@ -65,7 +65,7 @@ func (e *Executor) buildToolIndex() {
 			e.toolIndex[e.config.Tools[i].Name] = &e.config.Tools[i]
 		}
 	}
-	e.logger.Info("工具索引构建完成",
+	e.logger.Debug("工具索引构建完成",
 		zap.Int("totalTools", len(e.config.Tools)),
 		zap.Int("enabledTools", len(e.toolIndex)),
 	)
@@ -73,14 +73,14 @@ func (e *Executor) buildToolIndex() {
 
 // ExecuteTool 执行安全工具,Handler 闭包最终调用这里：
 func (e *Executor) ExecuteTool(ctx context.Context, toolName string, args map[string]interface{}) (*mcp.ToolResult, error) {
-	e.logger.Info("ExecuteTool被调用",
+	e.logger.Debug("ExecuteTool被调用",
 		zap.String("toolName", toolName),
 		zap.Any("args", args),
 	)
 
 	// 特殊处理：exec工具直接执行系统命令
 	if toolName == "exec" {
-		e.logger.Info("执行exec工具")
+		e.logger.Debug("执行exec工具")
 		return e.executeSystemCommand(ctx, args)
 	}
 
@@ -95,7 +95,7 @@ func (e *Executor) ExecuteTool(ctx context.Context, toolName string, args map[st
 		return nil, fmt.Errorf("工具 %s 未找到或未启用", toolName)
 	}
 
-	e.logger.Info("找到工具配置",
+	e.logger.Debug("找到工具配置",
 		zap.String("toolName", toolName),
 		zap.String("command", toolConfig.Command),
 		zap.Strings("args", toolConfig.Args),
@@ -103,7 +103,7 @@ func (e *Executor) ExecuteTool(ctx context.Context, toolName string, args map[st
 
 	// 特殊处理：内部工具（command 以 "internal:" 开头）
 	if strings.HasPrefix(toolConfig.Command, "internal:") {
-		e.logger.Info("执行内部工具",
+		e.logger.Debug("执行内部工具",
 			zap.String("toolName", toolName),
 			zap.String("command", toolConfig.Command),
 		)
@@ -113,7 +113,7 @@ func (e *Executor) ExecuteTool(ctx context.Context, toolName string, args map[st
 	// 构建命令参数（YAML parameters → CLI flags） - 根据工具类型使用不同的参数格式
 	cmdArgs := e.buildCommandArgs(toolName, toolConfig, args)
 
-	e.logger.Info("构建命令参数完成",
+	e.logger.Debug("构建命令参数完成",
 		zap.String("toolName", toolName),
 		zap.Strings("cmdArgs", cmdArgs),
 		zap.Int("argsCount", len(cmdArgs)),
@@ -142,7 +142,7 @@ func (e *Executor) ExecuteTool(ctx context.Context, toolName string, args map[st
 	attachNonInteractiveStdin(cmd)
 	_ = prepareShellCmdSession(cmd)
 
-	e.logger.Info("执行安全工具",
+	e.logger.Debug("执行安全工具",
 		zap.String("tool", toolName),
 		zap.Strings("args", cmdArgs),
 	)
@@ -183,7 +183,7 @@ func (e *Executor) ExecuteTool(ctx context.Context, toolName string, args map[st
 		if exitCode != nil && toolConfig.AllowedExitCodes != nil {
 			for _, allowedCode := range toolConfig.AllowedExitCodes {
 				if *exitCode == allowedCode {
-					e.logger.Info("工具执行完成（退出码在允许列表中）",
+					e.logger.Debug("工具执行完成（退出码在允许列表中）",
 						zap.String("tool", toolName),
 						zap.Int("exitCode", *exitCode),
 						zap.String("output", string(output)),
@@ -218,7 +218,7 @@ func (e *Executor) ExecuteTool(ctx context.Context, toolName string, args map[st
 		}, nil
 	}
 
-	e.logger.Info("工具执行成功",
+	e.logger.Debug("工具执行成功",
 		zap.String("tool", toolName),
 		zap.String("output", string(output)),
 	)
@@ -236,7 +236,7 @@ func (e *Executor) ExecuteTool(ctx context.Context, toolName string, args map[st
 
 // RegisterTools 注册工具到MCP服务器
 func (e *Executor) RegisterTools(mcpServer *mcp.Server) {
-	e.logger.Info("开始注册工具",
+	e.logger.Debug("开始注册工具",
 		zap.Int("totalTools", len(e.config.Tools)),
 		zap.Int("enabledTools", len(e.toolIndex)),
 	)
@@ -284,7 +284,7 @@ func (e *Executor) RegisterTools(mcpServer *mcp.Server) {
 		}
 
 		handler := func(ctx context.Context, args map[string]interface{}) (*mcp.ToolResult, error) {
-			e.logger.Info("工具handler被调用",
+			e.logger.Debug("工具handler被调用",
 				zap.String("toolName", toolName),
 				zap.Any("args", args),
 			)
@@ -292,14 +292,14 @@ func (e *Executor) RegisterTools(mcpServer *mcp.Server) {
 		}
 
 		mcpServer.RegisterTool(tool, handler)
-		e.logger.Info("注册安全工具成功",
+		e.logger.Debug("注册安全工具成功",
 			zap.String("tool", toolConfigCopy.Name),
 			zap.String("command", toolConfigCopy.Command),
 			zap.Int("index", i),
 		)
 	}
 
-	e.logger.Info("工具注册完成",
+	e.logger.Debug("工具注册完成",
 		zap.Int("registeredCount", len(e.config.Tools)),
 	)
 }

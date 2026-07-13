@@ -2,7 +2,6 @@ package config
 
 import (
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -11,6 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"cyberstrike-ai/internal/termout"
 
 	"gopkg.in/yaml.v3"
 )
@@ -43,9 +44,8 @@ type Config struct {
 }
 
 type EnsureLocalConfigResult struct {
-	Created           bool
-	GeneratedPassword string
-	ExamplePath       string
+	Created     bool
+	ExamplePath string
 }
 
 const (
@@ -54,6 +54,7 @@ const (
 	DefaultLatestUserMessageMaxRunes                  = 48000
 	DefaultLatestUserMessageHeadRunes                 = 24000
 	DefaultLatestUserMessageTailRunes                 = 24000
+	DefaultSummarizationOutputReserveTokens           = 8192
 )
 
 // ProjectConfig 项目黑板（跨对话共享事实）配置。
@@ -268,6 +269,8 @@ type MultiAgentEinoMiddlewareConfig struct {
 	ReductionSubAgents         bool     `yaml:"reduction_sub_agents,omitempty" json:"reduction_sub_agents,omitempty"` // also attach to sub-agents
 	// SummarizationTriggerRatio controls summarization trigger threshold as max_total_tokens * ratio (default 0.8).
 	SummarizationTriggerRatio float64 `yaml:"summarization_trigger_ratio,omitempty" json:"summarization_trigger_ratio,omitempty"`
+	// SummarizationOutputReserveTokens reserves completion headroom for the summarization model call (default 8192).
+	SummarizationOutputReserveTokens int `yaml:"summarization_output_reserve_tokens,omitempty" json:"summarization_output_reserve_tokens,omitempty"`
 	// SummarizationEmitInternalEvents controls middleware internal event emission (default true).
 	SummarizationEmitInternalEvents *bool `yaml:"summarization_emit_internal_events,omitempty" json:"summarization_emit_internal_events,omitempty"`
 	// SummarizationUserIntentLedgerMaxRunes caps the DB-backed immutable user input ledger injected into model context.
@@ -318,6 +321,13 @@ func (c MultiAgentEinoMiddlewareConfig) SummarizationTriggerRatioEffective() flo
 		return 0.95
 	}
 	return v
+}
+
+func (c MultiAgentEinoMiddlewareConfig) SummarizationOutputReserveTokensEffective() int {
+	if c.SummarizationOutputReserveTokens > 0 {
+		return c.SummarizationOutputReserveTokens
+	}
+	return DefaultSummarizationOutputReserveTokens
 }
 
 func (c MultiAgentEinoMiddlewareConfig) SummarizationEmitInternalEventsEffective() bool {
@@ -538,14 +548,50 @@ type RobotsConfig struct {
 
 // RobotWechatConfig 微信 iLink 机器人配置（个人微信 ClawBot / iLink 协议）
 type RobotWechatConfig struct {
-	Enabled       bool   `yaml:"enabled" json:"enabled"`
-	BotToken      string `yaml:"bot_token,omitempty" json:"bot_token,omitempty"`
-	ILinkBotID    string `yaml:"ilink_bot_id,omitempty" json:"ilink_bot_id,omitempty"`
-	ILinkUserID   string `yaml:"ilink_user_id,omitempty" json:"ilink_user_id,omitempty"`
-	BaseURL       string `yaml:"base_url,omitempty" json:"base_url,omitempty"`               // 默认 https://ilinkai.weixin.qq.com
-	BotType       string `yaml:"bot_type,omitempty" json:"bot_type,omitempty"`               // get_bot_qrcode 参数，默认 3
-	BotAgent      string `yaml:"bot_agent,omitempty" json:"bot_agent,omitempty"`             // base_info.bot_agent
-	GetUpdatesBuf string `yaml:"get_updates_buf,omitempty" json:"get_updates_buf,omitempty"` // 长轮询游标（运行时）
+	Enabled       bool                     `yaml:"enabled" json:"enabled"`
+	BotToken      string                   `yaml:"bot_token,omitempty" json:"bot_token,omitempty"`
+	ILinkBotID    string                   `yaml:"ilink_bot_id,omitempty" json:"ilink_bot_id,omitempty"`
+	ILinkUserID   string                   `yaml:"ilink_user_id,omitempty" json:"ilink_user_id,omitempty"`
+	BaseURL       string                   `yaml:"base_url,omitempty" json:"base_url,omitempty"`               // 默认 https://ilinkai.weixin.qq.com
+	BotType       string                   `yaml:"bot_type,omitempty" json:"bot_type,omitempty"`               // get_bot_qrcode 参数，默认 3
+	BotAgent      string                   `yaml:"bot_agent,omitempty" json:"bot_agent,omitempty"`             // base_info.bot_agent
+	GetUpdatesBuf string                   `yaml:"get_updates_buf,omitempty" json:"get_updates_buf,omitempty"` // 长轮询游标（运行时）
+	Auth          RobotAuthorizationConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
+}
+
+const (
+	RobotAuthModeUserBinding    = "user_binding"
+	RobotAuthModeServiceAccount = "service_account"
+)
+
+// RobotAuthorizationConfig controls how a verified platform sender becomes
+// an RBAC principal. service_account is intentionally fail-closed unless an
+// explicit non-admin service user and sender allowlist are both configured.
+type RobotAuthorizationConfig struct {
+	Mode                 string   `yaml:"mode,omitempty" json:"mode,omitempty"`
+	ServiceUserID        string   `yaml:"service_user_id,omitempty" json:"service_user_id,omitempty"`
+	AllowedExternalUsers []string `yaml:"allowed_external_users,omitempty" json:"allowed_external_users,omitempty"`
+}
+
+func (c RobotAuthorizationConfig) EffectiveMode() string {
+	mode := strings.ToLower(strings.TrimSpace(c.Mode))
+	if mode == "" {
+		return RobotAuthModeUserBinding
+	}
+	return mode
+}
+
+func (c RobotAuthorizationConfig) ExternalUserAllowed(externalUserID string) bool {
+	externalUserID = strings.TrimSpace(externalUserID)
+	if externalUserID == "" {
+		return false
+	}
+	for _, allowed := range c.AllowedExternalUsers {
+		if strings.TrimSpace(allowed) == externalUserID {
+			return true
+		}
+	}
+	return false
 }
 
 // RobotSessionConfig 机器人会话隔离策略
@@ -563,12 +609,13 @@ func (c RobotSessionConfig) StrictUserIdentityEnabled() bool {
 
 // RobotWecomConfig 企业微信机器人配置
 type RobotWecomConfig struct {
-	Enabled        bool   `yaml:"enabled" json:"enabled"`
-	Token          string `yaml:"token" json:"token"`                       // 回调 URL 校验 Token
-	EncodingAESKey string `yaml:"encoding_aes_key" json:"encoding_aes_key"` // EncodingAESKey
-	CorpID         string `yaml:"corp_id" json:"corp_id"`                   // 企业 ID
-	Secret         string `yaml:"secret" json:"secret"`                     // 应用 Secret
-	AgentID        int64  `yaml:"agent_id" json:"agent_id"`                 // 应用 AgentId
+	Enabled        bool                     `yaml:"enabled" json:"enabled"`
+	Token          string                   `yaml:"token" json:"token"`                       // 回调 URL 校验 Token
+	EncodingAESKey string                   `yaml:"encoding_aes_key" json:"encoding_aes_key"` // EncodingAESKey
+	CorpID         string                   `yaml:"corp_id" json:"corp_id"`                   // 企业 ID
+	Secret         string                   `yaml:"secret" json:"secret"`                     // 应用 Secret
+	AgentID        int64                    `yaml:"agent_id" json:"agent_id"`                 // 应用 AgentId
+	Auth           RobotAuthorizationConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
 }
 
 // ValidateWecomConfig 校验企业微信机器人配置；启用时必须配置 token，否则回调无法防伪造。
@@ -584,50 +631,137 @@ func ValidateWecomConfig(w RobotWecomConfig) error {
 
 // RobotDingtalkConfig 钉钉机器人配置
 type RobotDingtalkConfig struct {
-	Enabled                     bool   `yaml:"enabled" json:"enabled"`
-	ClientID                    string `yaml:"client_id" json:"client_id"`                                           // 应用 Key (AppKey)
-	ClientSecret                string `yaml:"client_secret" json:"client_secret"`                                   // 应用 Secret
-	AllowConversationIDFallback bool   `yaml:"allow_conversation_id_fallback" json:"allow_conversation_id_fallback"` // sender_id 缺失时是否允许回退到会话 ID
+	Enabled                     bool                     `yaml:"enabled" json:"enabled"`
+	ClientID                    string                   `yaml:"client_id" json:"client_id"`                                           // 应用 Key (AppKey)
+	ClientSecret                string                   `yaml:"client_secret" json:"client_secret"`                                   // 应用 Secret
+	AllowConversationIDFallback bool                     `yaml:"allow_conversation_id_fallback" json:"allow_conversation_id_fallback"` // sender_id 缺失时是否允许回退到会话 ID
+	Auth                        RobotAuthorizationConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
 }
 
 // RobotLarkConfig 飞书机器人配置
 type RobotLarkConfig struct {
-	Enabled             bool   `yaml:"enabled" json:"enabled"`
-	AppID               string `yaml:"app_id" json:"app_id"`                                 // 应用 App ID
-	AppSecret           string `yaml:"app_secret" json:"app_secret"`                         // 应用 App Secret
-	VerifyToken         string `yaml:"verify_token" json:"verify_token"`                     // 事件订阅 Verification Token（可选）
-	AllowChatIDFallback bool   `yaml:"allow_chat_id_fallback" json:"allow_chat_id_fallback"` // 用户 ID 缺失时是否允许回退到 chat_id
+	Enabled             bool                     `yaml:"enabled" json:"enabled"`
+	AppID               string                   `yaml:"app_id" json:"app_id"`                                 // 应用 App ID
+	AppSecret           string                   `yaml:"app_secret" json:"app_secret"`                         // 应用 App Secret
+	VerifyToken         string                   `yaml:"verify_token" json:"verify_token"`                     // 事件订阅 Verification Token（可选）
+	AllowChatIDFallback bool                     `yaml:"allow_chat_id_fallback" json:"allow_chat_id_fallback"` // 用户 ID 缺失时是否允许回退到 chat_id
+	Auth                RobotAuthorizationConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
 }
 
 // RobotTelegramConfig Telegram 机器人配置（Bot API 长轮询）
 type RobotTelegramConfig struct {
-	Enabled            bool   `yaml:"enabled" json:"enabled"`
-	BotToken           string `yaml:"bot_token" json:"bot_token"`
-	BotUsername        string `yaml:"bot_username,omitempty" json:"bot_username,omitempty"` // 可选，用于群聊 @ 识别；留空则启动时 getMe
-	AllowGroupMessages bool   `yaml:"allow_group_messages" json:"allow_group_messages"`     // 群聊中仅响应 @ 机器人
-	UpdateOffset       int64  `yaml:"update_offset,omitempty" json:"update_offset,omitempty"`
+	Enabled            bool                     `yaml:"enabled" json:"enabled"`
+	BotToken           string                   `yaml:"bot_token" json:"bot_token"`
+	BotUsername        string                   `yaml:"bot_username,omitempty" json:"bot_username,omitempty"` // 可选，用于群聊 @ 识别；留空则启动时 getMe
+	AllowGroupMessages bool                     `yaml:"allow_group_messages" json:"allow_group_messages"`     // 群聊中仅响应 @ 机器人
+	UpdateOffset       int64                    `yaml:"update_offset,omitempty" json:"update_offset,omitempty"`
+	Auth               RobotAuthorizationConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
 }
 
 // RobotSlackConfig Slack 机器人配置（Socket Mode，无需公网回调）
 type RobotSlackConfig struct {
-	Enabled  bool   `yaml:"enabled" json:"enabled"`
-	BotToken string `yaml:"bot_token" json:"bot_token"` // xoxb-
-	AppToken string `yaml:"app_token" json:"app_token"` // xapp-（connections:write）
+	Enabled  bool                     `yaml:"enabled" json:"enabled"`
+	BotToken string                   `yaml:"bot_token" json:"bot_token"` // xoxb-
+	AppToken string                   `yaml:"app_token" json:"app_token"` // xapp-（connections:write）
+	Auth     RobotAuthorizationConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
 }
 
 // RobotDiscordConfig Discord 机器人配置（Gateway WebSocket）
 type RobotDiscordConfig struct {
-	Enabled            bool   `yaml:"enabled" json:"enabled"`
-	BotToken           string `yaml:"bot_token" json:"bot_token"`
-	AllowGuildMessages bool   `yaml:"allow_guild_messages" json:"allow_guild_messages"` // 服务器频道中仅响应 @ 机器人
+	Enabled            bool                     `yaml:"enabled" json:"enabled"`
+	BotToken           string                   `yaml:"bot_token" json:"bot_token"`
+	AllowGuildMessages bool                     `yaml:"allow_guild_messages" json:"allow_guild_messages"` // 服务器频道中仅响应 @ 机器人
+	Auth               RobotAuthorizationConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
 }
 
 // RobotQQConfig QQ 机器人配置（QQ 开放平台 WebSocket）
 type RobotQQConfig struct {
-	Enabled      bool   `yaml:"enabled" json:"enabled"`
-	AppID        string `yaml:"app_id" json:"app_id"`
-	ClientSecret string `yaml:"client_secret" json:"client_secret"`
-	Sandbox      bool   `yaml:"sandbox" json:"sandbox"` // 沙箱环境（上线前测试）
+	Enabled      bool                     `yaml:"enabled" json:"enabled"`
+	AppID        string                   `yaml:"app_id" json:"app_id"`
+	ClientSecret string                   `yaml:"client_secret" json:"client_secret"`
+	Sandbox      bool                     `yaml:"sandbox" json:"sandbox"` // 沙箱环境（上线前测试）
+	Auth         RobotAuthorizationConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
+}
+
+func (c RobotsConfig) AuthorizationFor(platform string) RobotAuthorizationConfig {
+	switch strings.ToLower(strings.TrimSpace(platform)) {
+	case "wechat":
+		return c.Wechat.Auth
+	case "wecom":
+		return c.Wecom.Auth
+	case "dingtalk":
+		return c.Dingtalk.Auth
+	case "lark":
+		return c.Lark.Auth
+	case "telegram":
+		return c.Telegram.Auth
+	case "slack":
+		return c.Slack.Auth
+	case "discord":
+		return c.Discord.Auth
+	case "qq":
+		return c.QQ.Auth
+	default:
+		return RobotAuthorizationConfig{}
+	}
+}
+
+func ValidateRobotAuthorization(c RobotAuthorizationConfig, path string) error {
+	switch c.EffectiveMode() {
+	case RobotAuthModeUserBinding:
+		return nil
+	case RobotAuthModeServiceAccount:
+		serviceUserID := strings.TrimSpace(c.ServiceUserID)
+		if serviceUserID == "" {
+			return fmt.Errorf("%s.auth.service_user_id 不能为空", path)
+		}
+		if len(c.AllowedExternalUsers) == 0 {
+			return fmt.Errorf("%s.auth.allowed_external_users 至少配置一个真实发送者", path)
+		}
+		seen := map[string]bool{}
+		for _, userID := range c.AllowedExternalUsers {
+			userID = strings.TrimSpace(userID)
+			if userID == "" || userID == "*" {
+				return fmt.Errorf("%s.auth.allowed_external_users 不允许空值或通配符", path)
+			}
+			if seen[userID] {
+				return fmt.Errorf("%s.auth.allowed_external_users 包含重复用户", path)
+			}
+			seen[userID] = true
+		}
+		return nil
+	default:
+		return fmt.Errorf("%s.auth.mode 仅支持 user_binding 或 service_account", path)
+	}
+}
+
+func ValidateRobotsAuthorization(c RobotsConfig) error {
+	items := []struct {
+		path string
+		auth RobotAuthorizationConfig
+	}{
+		{"robots.wechat", c.Wechat.Auth}, {"robots.wecom", c.Wecom.Auth},
+		{"robots.dingtalk", c.Dingtalk.Auth}, {"robots.lark", c.Lark.Auth},
+		{"robots.telegram", c.Telegram.Auth}, {"robots.slack", c.Slack.Auth},
+		{"robots.discord", c.Discord.Auth}, {"robots.qq", c.QQ.Auth},
+	}
+	for _, item := range items {
+		if err := ValidateRobotAuthorization(item.auth, item.path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c RobotsConfig) ServiceAccountUserIDs() map[string]string {
+	out := map[string]string{}
+	for _, platform := range []string{"wechat", "wecom", "dingtalk", "lark", "telegram", "slack", "discord", "qq"} {
+		auth := c.AuthorizationFor(platform)
+		if auth.EffectiveMode() == RobotAuthModeServiceAccount {
+			out[platform] = strings.TrimSpace(auth.ServiceUserID)
+		}
+	}
+	return out
 }
 
 type ServerConfig struct {
@@ -650,11 +784,12 @@ type LogConfig struct {
 }
 
 type MCPConfig struct {
-	Enabled         bool   `yaml:"enabled"`
-	Host            string `yaml:"host"`
-	Port            int    `yaml:"port"`
-	AuthHeader      string `yaml:"auth_header,omitempty"`       // 鉴权 header 名，留空表示不鉴权
-	AuthHeaderValue string `yaml:"auth_header_value,omitempty"` // 鉴权 header 值，需与请求中该 header 一致
+	Enabled           bool   `yaml:"enabled"`
+	Host              string `yaml:"host"`
+	Port              int    `yaml:"port"`
+	AuthHeader        string `yaml:"auth_header,omitempty"`         // 可选的全局服务凭证 header；普通调用优先使用用户 Bearer Token
+	AuthHeaderValue   string `yaml:"auth_header_value,omitempty"`   // 全局服务凭证，仅 allow_global_access=true 时接受
+	AllowGlobalAccess bool   `yaml:"allow_global_access,omitempty"` // 静态服务密钥是否映射为全局服务身份（默认关闭）
 }
 
 type OpenAIConfig struct {
@@ -870,11 +1005,7 @@ func normalizeHitlModeForPrompt(mode string) string {
 }
 
 type AuthConfig struct {
-	Password                    string `yaml:"password" json:"password"`
-	SessionDurationHours        int    `yaml:"session_duration_hours" json:"session_duration_hours"`
-	GeneratedPassword           string `yaml:"-" json:"-"`
-	GeneratedPasswordPersisted  bool   `yaml:"-" json:"-"`
-	GeneratedPasswordPersistErr string `yaml:"-" json:"-"`
+	SessionDurationHours int `yaml:"session_duration_hours" json:"session_duration_hours"`
 }
 
 // MonitorConfig MCP 状态监控（tool_executions）保留策略。
@@ -1034,23 +1165,6 @@ func Load(path string) (*Config, error) {
 	if cfg.Audit.MaxDetailBytes <= 0 {
 		cfg.Audit.MaxDetailBytes = 8192
 	}
-	if strings.TrimSpace(cfg.Auth.Password) == "" {
-		password, err := generateStrongPassword(24)
-		if err != nil {
-			return nil, fmt.Errorf("生成默认密码失败: %w", err)
-		}
-
-		cfg.Auth.Password = password
-		cfg.Auth.GeneratedPassword = password
-
-		if err := PersistAuthPassword(path, password); err != nil {
-			cfg.Auth.GeneratedPasswordPersisted = false
-			cfg.Auth.GeneratedPasswordPersistErr = err.Error()
-		} else {
-			cfg.Auth.GeneratedPasswordPersisted = true
-		}
-	}
-
 	// 如果配置了工具目录，从目录加载工具配置
 	if cfg.Security.ToolsDir != "" {
 		inlineTools := append([]ToolConfig(nil), cfg.Security.Tools...)
@@ -1106,6 +1220,9 @@ func Load(path string) (*Config, error) {
 	if err := ValidateWecomConfig(cfg.Robots.Wecom); err != nil {
 		return nil, err
 	}
+	if err := ValidateRobotsAuthorization(cfg.Robots); err != nil {
+		return nil, err
+	}
 
 	return &cfg, nil
 }
@@ -1118,7 +1235,7 @@ func EnsureLocalConfig(path string) (EnsureLocalConfigResult, error) {
 
 	if _, err := os.Stat(path); err == nil {
 		return EnsureLocalConfigResult{}, nil
-	} else if err != nil && !os.IsNotExist(err) {
+	} else if !os.IsNotExist(err) {
 		return EnsureLocalConfigResult{}, fmt.Errorf("检查配置文件失败: %w", err)
 	}
 
@@ -1153,181 +1270,14 @@ func EnsureLocalConfig(path string) (EnsureLocalConfigResult, error) {
 		return EnsureLocalConfigResult{}, fmt.Errorf("创建配置文件失败: %w", err)
 	}
 
-	password, err := generateStrongPassword(24)
-	if err != nil {
-		return EnsureLocalConfigResult{}, fmt.Errorf("生成默认密码失败: %w", err)
-	}
-	if err := PersistAuthPassword(path, password); err != nil {
-		return EnsureLocalConfigResult{}, fmt.Errorf("写入默认密码失败: %w", err)
-	}
-
 	return EnsureLocalConfigResult{
-		Created:           true,
-		GeneratedPassword: password,
-		ExamplePath:       examplePath,
+		Created:     true,
+		ExamplePath: examplePath,
 	}, nil
 }
 
-func generateStrongPassword(length int) (string, error) {
-	if length <= 0 {
-		length = 24
-	}
-
-	bytesLen := length
-	randomBytes := make([]byte, bytesLen)
-	if _, err := rand.Read(randomBytes); err != nil {
-		return "", err
-	}
-
-	password := base64.RawURLEncoding.EncodeToString(randomBytes)
-	if len(password) > length {
-		password = password[:length]
-	}
-	return password, nil
-}
-
-func PersistAuthPassword(path, password string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-
-	lines := strings.Split(string(data), "\n")
-	inAuthBlock := false
-	authIndent := -1
-
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if !inAuthBlock {
-			if strings.HasPrefix(trimmed, "auth:") {
-				inAuthBlock = true
-				authIndent = len(line) - len(strings.TrimLeft(line, " "))
-			}
-			continue
-		}
-
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-
-		leadingSpaces := len(line) - len(strings.TrimLeft(line, " "))
-		if leadingSpaces <= authIndent {
-			// 离开 auth 块
-			inAuthBlock = false
-			authIndent = -1
-			// 继续寻找其它 auth 块（理论上没有）
-			if strings.HasPrefix(trimmed, "auth:") {
-				inAuthBlock = true
-				authIndent = leadingSpaces
-			}
-			continue
-		}
-
-		if strings.HasPrefix(strings.TrimSpace(line), "password:") {
-			prefix := line[:len(line)-len(strings.TrimLeft(line, " "))]
-			comment := ""
-			if idx := yamlLineCommentIndex(line); idx >= 0 {
-				comment = strings.TrimRight(line[idx:], " ")
-			}
-
-			newLine := fmt.Sprintf("%spassword: %s", prefix, quoteYAMLString(password))
-			if comment != "" {
-				if !strings.HasPrefix(comment, " ") {
-					newLine += " "
-				}
-				newLine += comment
-			}
-			lines[i] = newLine
-			break
-		}
-	}
-
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
-}
-
-func quoteYAMLString(value string) string {
-	node := yaml.Node{
-		Kind:  yaml.ScalarNode,
-		Tag:   "!!str",
-		Style: yaml.DoubleQuotedStyle,
-		Value: value,
-	}
-	data, err := yaml.Marshal(&node)
-	if err != nil {
-		return strconv.Quote(value)
-	}
-	return strings.TrimSuffix(string(data), "\n")
-}
-
-func yamlLineCommentIndex(line string) int {
-	inSingleQuote := false
-	inDoubleQuote := false
-	escaped := false
-
-	for i, r := range line {
-		if inDoubleQuote {
-			if escaped {
-				escaped = false
-				continue
-			}
-			if r == '\\' {
-				escaped = true
-				continue
-			}
-			if r == '"' {
-				inDoubleQuote = false
-			}
-			continue
-		}
-		if inSingleQuote {
-			if r == '\'' {
-				inSingleQuote = false
-			}
-			continue
-		}
-
-		switch r {
-		case '"':
-			inDoubleQuote = true
-		case '\'':
-			inSingleQuote = true
-		case '#':
-			if i == 0 || isYAMLWhitespace(line[i-1]) {
-				return i
-			}
-		}
-	}
-	return -1
-}
-
-func isYAMLWhitespace(b byte) bool {
-	return b == ' ' || b == '\t'
-}
-
-func PrintGeneratedPasswordWarning(password string, persisted bool, persistErr string) {
-	if strings.TrimSpace(password) == "" {
-		return
-	}
-
-	if persisted {
-		fmt.Println("[CyberStrikeAI] ✅ 已为您自动生成并写入 Web 登录密码。")
-	} else {
-		if persistErr != "" {
-			fmt.Printf("[CyberStrikeAI] ⚠️ 无法自动写入配置文件中的密码: %s\n", persistErr)
-		} else {
-			fmt.Println("[CyberStrikeAI] ⚠️ 无法自动写入配置文件中的密码。")
-		}
-		fmt.Println("请手动将以下随机密码写入 config.yaml 的 auth.password：")
-	}
-
-	fmt.Println("----------------------------------------------------------------")
-	fmt.Println("CyberStrikeAI Auto-Generated Web Password")
-	fmt.Printf("Password: %s\n", password)
-	fmt.Println("WARNING: Anyone with this password can fully control CyberStrikeAI.")
-	fmt.Println("Please store it securely and change it in config.yaml as soon as possible.")
-	fmt.Println("警告：持有此密码的人将拥有对 CyberStrikeAI 的完全控制权限。")
-	fmt.Println("请妥善保管，并尽快在 config.yaml 中修改 auth.password！")
-	fmt.Println("----------------------------------------------------------------")
+func PrintBootstrapAdminPassword(password string) {
+	termout.PrintBootstrapAdminCredentials(password)
 }
 
 // generateRandomToken 生成用于 MCP 鉴权的随机字符串（64 位十六进制）
@@ -1396,9 +1346,10 @@ func persistMCPAuth(path string, mcp *MCPConfig) error {
 	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
 }
 
-// EnsureMCPAuth 在 MCP 启用且 auth_header_value 为空时，自动生成随机密钥并写回配置
+// EnsureMCPAuth only provisions the privileged static service credential when
+// global service access was explicitly enabled.
 func EnsureMCPAuth(path string, cfg *Config) error {
-	if !cfg.MCP.Enabled || strings.TrimSpace(cfg.MCP.AuthHeaderValue) != "" {
+	if !cfg.MCP.Enabled || !cfg.MCP.AllowGlobalAccess || strings.TrimSpace(cfg.MCP.AuthHeaderValue) != "" {
 		return nil
 	}
 	token, err := generateRandomToken()
@@ -1422,8 +1373,9 @@ func PrintMCPConfigJSON(mcp MCPConfig) {
 		hostForURL = "localhost"
 	}
 	url := fmt.Sprintf("http://%s:%d/mcp", hostForURL, mcp.Port)
-	headers := map[string]string{}
-	if mcp.AuthHeader != "" {
+	headers := map[string]string{"Authorization": "Bearer <USER_SESSION_TOKEN>"}
+	if mcp.AllowGlobalAccess && mcp.AuthHeader != "" {
+		delete(headers, "Authorization")
 		headers[mcp.AuthHeader] = mcp.AuthHeaderValue
 	}
 	serverEntry := map[string]interface{}{
@@ -1683,8 +1635,8 @@ func Default() *Config {
 			Output: "stdout",
 		},
 		MCP: MCPConfig{
-			Enabled: true,
-			Host:    "0.0.0.0",
+			Enabled: false,
+			Host:    "127.0.0.1",
 			Port:    8081,
 		},
 		OpenAI: OpenAIConfig{

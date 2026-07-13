@@ -15,6 +15,7 @@ import (
 
 	"cyberstrike-ai/internal/audit"
 	"cyberstrike-ai/internal/database"
+	"cyberstrike-ai/internal/security"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -144,13 +145,13 @@ func normalizeWindowsCmdPath(p string) string {
 	return strings.ReplaceAll(s, "/", "\\")
 }
 
-// quotePsSingle 把字符串按 PowerShell 单引号字符串规则转义（内部 ' → ''）。
+// quotePsSingle 把字符串按 PowerShell 单引号字符串规则转义（内部 ' → ”）。
 // 供 PowerShell 脚本参数使用，全脚本只用单引号，外层 cmd 再用双引号包裹即可安全传递。
 func quotePsSingle(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
-// quoteShellSinglePosix 把路径按 POSIX sh 单引号规则转义（内部 ' → '\''）
+// quoteShellSinglePosix 把路径按 POSIX sh 单引号规则转义（内部 ' → '\”）
 func quoteShellSinglePosix(p string) string {
 	if p == "" {
 		return "."
@@ -379,7 +380,8 @@ func (h *WebShellHandler) ListConnections(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database not available"})
 		return
 	}
-	list, err := h.db.ListWebshellConnections()
+	session, _ := security.CurrentSession(c)
+	list, err := h.db.ListWebshellConnectionsForAccess(session.UserID, session.Scope)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -433,6 +435,10 @@ func (h *WebShellHandler) CreateConnection(c *gin.Context) {
 	if err := h.db.CreateWebshellConnection(conn); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	if session, ok := security.CurrentSession(c); ok {
+		_ = h.db.SetResourceOwner("webshell", conn.ID, session.UserID)
+		_ = h.db.AssignResourceToUser(session.UserID, "webshell", conn.ID)
 	}
 	if h.audit != nil {
 		host := req.URL
@@ -659,14 +665,15 @@ func (h *WebShellHandler) ListAIConversations(c *gin.Context) {
 
 // ExecRequest 执行命令请求（前端传入连接信息 + 命令）
 type ExecRequest struct {
-	URL      string `json:"url" binding:"required"`
-	Password string `json:"password"`
-	Type     string `json:"type"`      // php, asp, aspx, jsp, custom
-	Method   string `json:"method"`    // GET 或 POST，空则默认 POST
-	CmdParam string `json:"cmd_param"` // 命令参数名，如 cmd/xxx，空则默认 cmd
-	Encoding string `json:"encoding"`  // 响应编码：auto / utf-8 / gbk / gb18030，空则 auto
-	OS       string `json:"os"`        // 目标操作系统：auto / linux / windows，当前 exec 不用它，保留字段便于未来扩展
-	Command  string `json:"command" binding:"required"`
+	URL          string `json:"url" binding:"required"`
+	Password     string `json:"password"`
+	Type         string `json:"type"`      // php, asp, aspx, jsp, custom
+	Method       string `json:"method"`    // GET 或 POST，空则默认 POST
+	CmdParam     string `json:"cmd_param"` // 命令参数名，如 cmd/xxx，空则默认 cmd
+	Encoding     string `json:"encoding"`  // 响应编码：auto / utf-8 / gbk / gb18030，空则 auto
+	OS           string `json:"os"`        // 目标操作系统：auto / linux / windows，当前 exec 不用它，保留字段便于未来扩展
+	ConnectionID string `json:"connection_id,omitempty"`
+	Command      string `json:"command" binding:"required"`
 }
 
 // ExecResponse 执行命令响应
@@ -714,6 +721,15 @@ func (h *WebShellHandler) Exec(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "url and command are required"})
 		return
 	}
+	conn, allowed := h.authorizedWebshellConnection(c, req.ConnectionID, req.URL)
+	if !allowed {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权访问该资源"})
+		return
+	}
+	// The database record is authoritative. Never let a caller pair an
+	// authorized ID with attacker-controlled transport credentials or a URL.
+	req.URL, req.Password, req.Type = conn.URL, conn.Password, conn.Type
+	req.Method, req.CmdParam, req.Encoding = conn.Method, conn.CmdParam, conn.Encoding
 
 	parsed, err := url.Parse(req.URL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
@@ -807,6 +823,13 @@ func (h *WebShellHandler) FileOp(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "url and action are required"})
 		return
 	}
+	conn, allowed := h.authorizedWebshellConnection(c, req.ConnectionID, req.URL)
+	if !allowed {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权访问该资源"})
+		return
+	}
+	req.URL, req.Password, req.Type = conn.URL, conn.Password, conn.Type
+	req.Method, req.CmdParam, req.Encoding, req.OS = conn.Method, conn.CmdParam, conn.Encoding, conn.OS
 
 	parsed, err := url.Parse(req.URL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
@@ -881,6 +904,28 @@ func (h *WebShellHandler) FileOp(c *gin.Context) {
 		Output:     output,
 		DetectedOS: detectedOS,
 	})
+}
+
+func (h *WebShellHandler) authorizedWebshellConnection(c *gin.Context, connectionID, requestURL string) (*database.WebShellConnection, bool) {
+	connectionID = strings.TrimSpace(connectionID)
+	if connectionID == "" {
+		return nil, false
+	}
+	if h.db == nil {
+		return nil, false
+	}
+	session, ok := security.CurrentSession(c)
+	if !ok || !h.db.UserCanAccessResource(session.UserID, session.Scope, "webshell", connectionID) {
+		return nil, false
+	}
+	conn, err := h.db.GetWebshellConnection(connectionID)
+	if err != nil || conn == nil {
+		return nil, false
+	}
+	if requestURL = strings.TrimSpace(requestURL); requestURL != "" && strings.TrimSpace(conn.URL) != requestURL {
+		return nil, false
+	}
+	return conn, true
 }
 
 // ExecWithConnection 在指定 WebShell 连接上执行命令（供 MCP/Agent 等非 HTTP 调用）

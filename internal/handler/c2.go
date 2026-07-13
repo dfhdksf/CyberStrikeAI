@@ -17,6 +17,7 @@ import (
 	"cyberstrike-ai/internal/audit"
 	"cyberstrike-ai/internal/c2"
 	"cyberstrike-ai/internal/database"
+	"cyberstrike-ai/internal/security"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -59,7 +60,7 @@ func (h *C2Handler) SetManager(m *c2.Manager) {
 
 // ListListeners 获取监听器列表
 func (h *C2Handler) ListListeners(c *gin.Context) {
-	listeners, err := h.mgr().DB().ListC2Listeners()
+	listeners, err := h.mgr().DB().ListC2ListenersForAccess(c2AccessFromContext(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -108,6 +109,11 @@ func (h *C2Handler) CreateListener(c *gin.Context) {
 		}
 		c.JSON(code, gin.H{"error": err.Error()})
 		return
+	}
+	if session, ok := security.CurrentSession(c); ok {
+		listener.OwnerUserID = session.UserID
+		_ = h.mgr().DB().SetResourceOwner("c2_listener", listener.ID, session.UserID)
+		_ = h.mgr().DB().AssignResourceToUser(session.UserID, "c2_listener", listener.ID)
 	}
 	implantToken := listener.ImplantToken
 	listener.EncryptionKey = ""
@@ -282,7 +288,7 @@ func (h *C2Handler) ListSessions(c *gin.Context) {
 		filter.Suspicious = true
 	}
 
-	sessions, err := h.mgr().DB().ListC2Sessions(filter)
+	sessions, err := h.mgr().DB().ListC2SessionsForAccess(filter, c2AccessFromContext(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -304,10 +310,10 @@ func (h *C2Handler) GetSession(c *gin.Context) {
 	}
 
 	// 获取最近任务
-	tasks, _ := h.mgr().DB().ListC2Tasks(database.ListC2TasksFilter{
+	tasks, _ := h.mgr().DB().ListC2TasksForAccess(database.ListC2TasksFilter{
 		SessionID: id,
 		Limit:     20,
-	})
+	}, c2AccessFromContext(c))
 
 	c.JSON(http.StatusOK, gin.H{
 		"session": session,
@@ -341,7 +347,7 @@ func (h *C2Handler) DeleteSessions(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "ids is required"})
 		return
 	}
-	n, err := h.mgr().DB().DeleteC2SessionsByIDs(req.IDs)
+	n, err := h.mgr().DB().DeleteC2SessionsByIDsForAccess(req.IDs, c2AccessFromContext(c))
 	if err != nil {
 		if errors.Is(err, database.ErrNoValidC2SessionIDs) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -433,24 +439,25 @@ func (h *C2Handler) ListTasks(c *gin.Context) {
 		}
 	}
 
-	tasks, err := h.mgr().DB().ListC2Tasks(filter)
+	access := c2AccessFromContext(c)
+	tasks, err := h.mgr().DB().ListC2TasksForAccess(filter, access)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	// 仪表盘「待审任务」为全局 queued/pending 数量，与列表 session 过滤无关
-	pendingN, _ := h.mgr().DB().CountC2TasksQueuedOrPending("")
+	pendingN, _ := h.mgr().DB().CountC2TasksQueuedOrPendingForAccess("", access)
 
 	if !paginated {
 		c.JSON(http.StatusOK, gin.H{
-			"tasks":                  tasks,
-			"pending_queued_count":   pendingN,
+			"tasks":                tasks,
+			"pending_queued_count": pendingN,
 		})
 		return
 	}
 
-	total, err := h.mgr().DB().CountC2Tasks(filter)
+	total, err := h.mgr().DB().CountC2TasksForAccess(filter, access)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -477,7 +484,7 @@ func (h *C2Handler) DeleteTasks(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "ids is required"})
 		return
 	}
-	n, err := h.mgr().DB().DeleteC2TasksByIDs(req.IDs)
+	n, err := h.mgr().DB().DeleteC2TasksByIDsForAccess(req.IDs, c2AccessFromContext(c))
 	if err != nil {
 		if errors.Is(err, database.ErrNoValidC2TaskIDs) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -521,6 +528,21 @@ func (h *C2Handler) CreateTask(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+	if strings.TrimSpace(req.SessionID) == "" {
+		req.SessionID = strings.TrimSpace(c.Param("id"))
+	}
+	if !h.c2ResourceAllowed(c, "c2_session", req.SessionID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权访问该资源"})
+		return
+	}
+	if conversationID := strings.TrimSpace(req.ConversationID); conversationID != "" {
+		session, ok := security.CurrentSession(c)
+		if !ok || !h.mgr().DB().UserCanAccessResource(session.UserID, session.Scope, "conversation", conversationID) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "无权关联目标对话"})
+			return
+		}
+		req.ConversationID = conversationID
 	}
 
 	input := c2.EnqueueTaskInput{
@@ -621,6 +643,10 @@ func (h *C2Handler) PayloadOneliner(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "listener not found"})
 		return
 	}
+	if !h.c2ResourceAllowed(c, "c2_listener", req.ListenerID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权访问该资源"})
+		return
+	}
 
 	host := c2.ResolveBeaconDialHost(listener, strings.TrimSpace(req.Host), h.logger, listener.ID)
 
@@ -684,6 +710,10 @@ func (h *C2Handler) PayloadBuild(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "listener not found"})
 		return
 	}
+	if !h.c2ResourceAllowed(c, "c2_listener", req.ListenerID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权访问该资源"})
+		return
+	}
 
 	builder := c2.NewPayloadBuilder(h.mgr(), h.logger, "", "")
 	input := c2.PayloadBuilderInput{
@@ -699,6 +729,9 @@ func (h *C2Handler) PayloadBuild(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	if session, ok := security.CurrentSession(c); ok {
+		_ = h.mgr().DB().RecordC2PayloadArtifact(filepath.Base(result.OutputPath), result.PayloadID, result.ListenerID, session.UserID)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -716,6 +749,11 @@ func (h *C2Handler) PayloadDownload(c *gin.Context) {
 	}
 	if strings.Contains(filename, "/") || strings.Contains(filename, "\\") || strings.Contains(filename, "..") {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload id"})
+		return
+	}
+	session, ok := security.CurrentSession(c)
+	if !ok || !h.mgr().DB().UserCanAccessC2Payload(session.UserID, session.Scope, filename) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权访问该资源"})
 		return
 	}
 
@@ -779,7 +817,8 @@ func (h *C2Handler) ListEvents(c *gin.Context) {
 		}
 	}
 
-	events, err := h.mgr().DB().ListC2Events(filter)
+	access := c2AccessFromContext(c)
+	events, err := h.mgr().DB().ListC2EventsForAccess(filter, access)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -788,7 +827,7 @@ func (h *C2Handler) ListEvents(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"events": events})
 		return
 	}
-	total, err := h.mgr().DB().CountC2Events(filter)
+	total, err := h.mgr().DB().CountC2EventsForAccess(filter, access)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -814,7 +853,7 @@ func (h *C2Handler) DeleteEvents(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "ids is required"})
 		return
 	}
-	n, err := h.mgr().DB().DeleteC2EventsByIDs(req.IDs)
+	n, err := h.mgr().DB().DeleteC2EventsByIDsForAccess(req.IDs, c2AccessFromContext(c))
 	if err != nil {
 		if errors.Is(err, database.ErrNoValidC2EventIDs) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -850,6 +889,9 @@ func (h *C2Handler) EventStream(c *gin.Context) {
 		case e, ok := <-sub.Ch:
 			if !ok {
 				return false
+			}
+			if !h.c2EventAllowed(c, e) {
+				return true
 			}
 			data, _ := json.Marshal(e)
 			fmt.Fprintf(w, "data: %s\n\n", data)
@@ -964,6 +1006,10 @@ func (h *C2Handler) UploadFileForImplant(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id and remote_path required"})
 		return
 	}
+	if !h.c2ResourceAllowed(c, "c2_session", sessionID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权访问该资源"})
+		return
+	}
 
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
@@ -1018,6 +1064,10 @@ func (h *C2Handler) ListFiles(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id required"})
 		return
 	}
+	if !h.c2ResourceAllowed(c, "c2_session", sessionID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权访问该资源"})
+		return
+	}
 	files, err := h.mgr().DB().ListC2FilesBySession(sessionID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -1038,6 +1088,10 @@ func (h *C2Handler) DownloadResultFile(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
 		return
 	}
+	if !h.c2ResourceAllowed(c, "c2_task", taskID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权访问该资源"})
+		return
+	}
 	if task.ResultBlobPath == "" {
 		c.JSON(http.StatusNotFound, gin.H{"error": "no result file for this task"})
 		return
@@ -1051,6 +1105,42 @@ func osMkdirAll(path string) error {
 
 func osCreate(path string) (*os.File, error) {
 	return os.Create(path)
+}
+
+func c2AccessFromContext(c *gin.Context) database.RBACListAccess {
+	session, ok := security.CurrentSession(c)
+	if !ok {
+		return database.RBACListAccess{}
+	}
+	return database.RBACListAccess{UserID: session.UserID, Scope: session.Scope}
+}
+
+func (h *C2Handler) c2ResourceAllowed(c *gin.Context, resourceType, resourceID string) bool {
+	session, ok := security.CurrentSession(c)
+	if !ok {
+		return false
+	}
+	return h.mgr().DB().UserCanAccessResource(session.UserID, session.Scope, resourceType, resourceID)
+}
+
+func (h *C2Handler) c2EventAllowed(c *gin.Context, e *c2.Event) bool {
+	if e == nil {
+		return false
+	}
+	session, ok := security.CurrentSession(c)
+	if !ok {
+		return false
+	}
+	if session.Scope == database.RBACScopeAll {
+		return true
+	}
+	if strings.TrimSpace(e.SessionID) != "" {
+		return h.mgr().DB().UserCanAccessResource(session.UserID, session.Scope, "c2_session", e.SessionID)
+	}
+	if strings.TrimSpace(e.TaskID) != "" {
+		return h.mgr().DB().UserCanAccessResource(session.UserID, session.Scope, "c2_task", e.TaskID)
+	}
+	return false
 }
 
 // ============================================================================

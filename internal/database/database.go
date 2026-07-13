@@ -113,10 +113,10 @@ func (db *DB) runPassiveCheckpoint(trigger string) {
 		return
 	}
 	if busy > 0 {
-		db.logger.Info("SQLite PASSIVE checkpoint 完成（部分推进）", fields...)
+		db.logger.Debug("SQLite PASSIVE checkpoint 完成（部分推进）", fields...)
 		return
 	}
-	db.logger.Info("SQLite PASSIVE checkpoint 完成（成功）", fields...)
+	db.logger.Debug("SQLite PASSIVE checkpoint 完成（成功）", fields...)
 }
 
 // NewDB 创建数据库连接
@@ -225,6 +225,8 @@ func (db *DB) initTables() error {
 		start_time DATETIME NOT NULL,
 		end_time DATETIME,
 		duration_ms INTEGER,
+		owner_user_id TEXT,
+		conversation_id TEXT,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);`
 
@@ -300,6 +302,7 @@ func (db *DB) initTables() error {
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
 		icon TEXT,
+		owner_user_id TEXT,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);`
@@ -322,6 +325,7 @@ func (db *DB) initTables() error {
 		session_key TEXT PRIMARY KEY,
 		conversation_id TEXT NOT NULL,
 		role_name TEXT NOT NULL DEFAULT '默认',
+		agent_mode TEXT NOT NULL DEFAULT 'eino_single',
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 	);`
@@ -478,6 +482,7 @@ func (db *DB) initTables() error {
 		status TEXT NOT NULL DEFAULT 'stopped',
 		config_json TEXT NOT NULL DEFAULT '{}',
 		remark TEXT NOT NULL DEFAULT '',
+		owner_user_id TEXT,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		started_at DATETIME,
 		last_error TEXT
@@ -746,6 +751,9 @@ func (db *DB) initTables() error {
 	if _, err := db.Exec(createRobotUserSessionsTable); err != nil {
 		return fmt.Errorf("创建robot_user_sessions表失败: %w", err)
 	}
+	if err := db.migrateRobotUserSessionsTable(); err != nil {
+		return fmt.Errorf("迁移robot_user_sessions表失败: %w", err)
+	}
 
 	if _, err := db.Exec(createProjectsTable); err != nil {
 		return fmt.Errorf("创建projects表失败: %w", err)
@@ -781,6 +789,10 @@ func (db *DB) initTables() error {
 
 	if _, err := db.Exec(createAuditLogsTable); err != nil {
 		return fmt.Errorf("创建audit_logs表失败: %w", err)
+	}
+
+	if err := db.initRBACTables(); err != nil {
+		return fmt.Errorf("创建RBAC表失败: %w", err)
 	}
 
 	for tableName, ddl := range map[string]string{
@@ -853,12 +865,27 @@ func (db *DB) initTables() error {
 	if err := db.migrateWorkflowRunsTable(); err != nil {
 		db.logger.Warn("迁移workflow_runs表失败", zap.Error(err))
 	}
+	if err := db.migrateRBACOwnershipColumns(); err != nil {
+		db.logger.Warn("迁移RBAC资源归属字段失败", zap.Error(err))
+	}
 
 	if _, err := db.Exec(createIndexes); err != nil {
 		return fmt.Errorf("创建索引失败: %w", err)
 	}
 
-	db.logger.Info("数据库表初始化完成")
+	db.logger.Debug("数据库表初始化完成")
+	return nil
+}
+
+func (db *DB) migrateRobotUserSessionsTable() error {
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('robot_user_sessions') WHERE name='agent_mode'").Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		_, err := db.Exec("ALTER TABLE robot_user_sessions ADD COLUMN agent_mode TEXT NOT NULL DEFAULT 'eino_single'")
+		return err
+	}
 	return nil
 }
 

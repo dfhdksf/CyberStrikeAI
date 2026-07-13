@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,10 +17,10 @@ import (
 
 	"cyberstrike-ai/internal/agent"
 	"cyberstrike-ai/internal/audit"
+	"cyberstrike-ai/internal/authctx"
 	"cyberstrike-ai/internal/c2"
 	"cyberstrike-ai/internal/config"
 	"cyberstrike-ai/internal/database"
-	"cyberstrike-ai/internal/docgen"
 	"cyberstrike-ai/internal/einoobserve"
 	"cyberstrike-ai/internal/handler"
 	"cyberstrike-ai/internal/hitl"
@@ -84,12 +85,6 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 	// CORS中间件
 	router.Use(corsMiddleware())
 
-	// 认证管理器
-	authManager, err := security.NewAuthManager(cfg.Auth.Password, cfg.Auth.SessionDurationHours)
-	if err != nil {
-		return nil, fmt.Errorf("初始化认证失败: %w", err)
-	}
-
 	// 初始化数据库
 	dbPath := cfg.Database.Path
 	if dbPath == "" {
@@ -106,6 +101,20 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 		return nil, fmt.Errorf("初始化数据库失败: %w", err)
 	}
 
+	// 认证管理器（数据库初始化后挂载 RBAC）
+	authManager := security.NewAuthManager(cfg.Auth.SessionDurationHours)
+	if generatedPassword, err := authManager.AttachRBACStore(db); err != nil {
+		return nil, fmt.Errorf("初始化RBAC失败: %w", err)
+	} else if generatedPassword != "" {
+		config.PrintBootstrapAdminPassword(generatedPassword)
+	}
+	for platform, userID := range cfg.Robots.ServiceAccountUserIDs() {
+		user, userErr := db.GetRBACUserByID(userID)
+		if userErr != nil || !user.Enabled {
+			return nil, fmt.Errorf("robots.%s.auth.service_user_id 必须指向已启用的 RBAC 用户", platform)
+		}
+	}
+
 	auditSvc := audit.NewService(db, cfg, log.Logger)
 	audit.RegisterConversationCreateHook(auditSvc)
 	auditSvc.PurgeExpired()
@@ -115,12 +124,16 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 	monitorRetention.PurgeExpired()
 	monitor.StartRetentionLoop(monitorRetention, log.Logger)
 
+	if err := handler.NewHITLManager(db, log.Logger).EnsureSchema(); err != nil {
+		log.Logger.Warn("初始化 HITL 表失败", zap.Error(err))
+	}
 	hitlRetention := hitl.NewService(db, cfg, log.Logger)
 	hitlRetention.PurgeExpired()
 	hitl.StartRetentionLoop(hitlRetention, log.Logger)
 
 	// 创建MCP服务器（带数据库持久化）
 	mcpServer := mcp.NewServerWithStorage(log.Logger, db)
+	mcpServer.SetToolAuthorizer(mcpToolAuthorizer(db))
 	mcpServer.ConfigureHTTPToolCallTimeoutFromAgentMinutes(cfg.Agent.ToolTimeoutMinutes)
 
 	// 创建安全工具执行器
@@ -135,22 +148,9 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 	registerProjectFactTools(mcpServer, db, cfg, log.Logger)
 	registerVisionTools(mcpServer, cfg, log.Logger)
 
-	// 注册文档生成工具(docgen)
-	repoRoot, _ := os.Getwd()
-	if repoRoot == "" {
-		repoRoot = "."
-	}
-	docgen.RegisterDocgenTools(mcpServer, db, cfg, repoRoot, log.Logger)
-
-	if cfg.Auth.GeneratedPassword != "" {
-		config.PrintGeneratedPasswordWarning(cfg.Auth.GeneratedPassword, cfg.Auth.GeneratedPasswordPersisted, cfg.Auth.GeneratedPasswordPersistErr)
-		cfg.Auth.GeneratedPassword = ""
-		cfg.Auth.GeneratedPasswordPersisted = false
-		cfg.Auth.GeneratedPasswordPersistErr = ""
-	}
-
 	// 创建外部MCP管理器（使用与内部MCP服务器相同的存储）
 	externalMCPMgr := mcp.NewExternalMCPManagerWithStorage(log.Logger, db)
+	externalMCPMgr.SetToolAuthorizer(externalMCPToolAuthorizer())
 	if cfg.ExternalMCP.Servers != nil {
 		externalMCPMgr.LoadConfigs(&cfg.ExternalMCP)
 		// 启动所有启用的外部MCP客户端
@@ -176,7 +176,7 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 	var knowledgeHandler *handler.KnowledgeHandler
 
 	var knowledgeDBConn *database.DB
-	log.Logger.Info("检查知识库配置", zap.Bool("enabled", cfg.Knowledge.Enabled))
+	log.Logger.Debug("检查知识库配置", zap.Bool("enabled", cfg.Knowledge.Enabled))
 	if cfg.Knowledge.Enabled {
 		// 确定知识库数据库路径
 		knowledgeDBPath := cfg.Database.KnowledgeDBPath
@@ -319,7 +319,7 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 	}
 
 	skillsDir := skillpackage.SkillsRootFromConfig(cfg.SkillsDir, configPath)
-	log.Logger.Info("Skills 目录（Eino ADK skill 中间件 + Web 管理 API）", zap.String("skillsDir", skillsDir))
+	log.Logger.Debug("Skills 目录（Eino ADK skill 中间件 + Web 管理 API）", zap.String("skillsDir", skillsDir))
 	configDir := filepath.Dir(configPath)
 	plantaskRel := strings.TrimSpace(cfg.MultiAgent.EinoMiddleware.PlantaskRelDir)
 	if plantaskRel == "" {
@@ -345,7 +345,7 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 	}
 	markdownAgentsHandler := handler.NewMarkdownAgentsHandler(agentsDir)
 	markdownAgentsHandler.SetAudit(auditSvc)
-	log.Logger.Info("多代理 Markdown 子 Agent 目录", zap.String("agentsDir", agentsDir))
+	log.Logger.Debug("多代理 Markdown 子 Agent 目录", zap.String("agentsDir", agentsDir))
 
 	// 创建处理器
 	agentHandler := handler.NewAgentHandler(agent, db, cfg, log.Logger)
@@ -368,17 +368,21 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 	attackChainHandler := handler.NewAttackChainHandler(db, &cfg.OpenAI, log.Logger)
 	vulnerabilityHandler := handler.NewVulnerabilityHandler(db, log.Logger)
 	projectHandler := handler.NewProjectHandler(db, log.Logger)
+	rbacHandler := handler.NewRBACHandler(db, log.Logger)
+	rbacHandler.SetAudit(auditSvc)
+	rbacHandler.SetAuthManager(authManager)
 	workflowHandler := handler.NewWorkflowHandler(db, log.Logger)
 	workflowHandler.SetAudit(auditSvc)
 	workflowHandler.SetRuntime(agent, cfg)
 	vulnerabilityHandler.SetAudit(auditSvc)
 	webshellHandler := handler.NewWebShellHandler(log.Logger, db)
 	webshellHandler.SetAudit(auditSvc)
-	chatUploadsHandler := handler.NewChatUploadsHandler(log.Logger)
+	chatUploadsHandler := handler.NewChatUploadsHandler(log.Logger, db)
 	chatUploadsHandler.SetAudit(auditSvc)
 	registerWebshellTools(mcpServer, db, webshellHandler, log.Logger)
 	registerWebshellManagementTools(mcpServer, db, webshellHandler, log.Logger)
 	configHandler := handler.NewConfigHandler(configPath, cfg, mcpServer, executor, agent, attackChainHandler, externalMCPMgr, log.Logger)
+	configHandler.SetDB(db)
 	configHandler.SetAudit(auditSvc)
 	agentHandler.SetHitlToolWhitelistSaver(configHandler)
 	agentHandler.SetHitlAuditStrategySaver(configHandler)
@@ -411,6 +415,7 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 	conversationHandler.SetTaskStopper(agentHandler)
 	auditHandler := handler.NewAuditHandler(db, auditSvc, log.Logger)
 	robotHandler := handler.NewRobotHandler(cfg, db, agentHandler, log.Logger)
+	robotHandler.SetAudit(auditSvc)
 	openAPIHandler := handler.NewOpenAPIHandler(db, log.Logger, conversationHandler, agentHandler)
 
 	// 创建 App 实例（部分字段稍后填充）
@@ -445,11 +450,6 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 		registerVulnerabilityTools(mcpServer, db, log.Logger)
 		registerProjectFactTools(mcpServer, db, cfg, log.Logger)
 		registerVisionTools(mcpServer, cfg, log.Logger)
-		if docgenRoot, wdErr := os.Getwd(); wdErr == nil {
-			docgen.RegisterDocgenTools(mcpServer, db, cfg, docgenRoot, log.Logger)
-		} else {
-			docgen.RegisterDocgenTools(mcpServer, db, cfg, ".", log.Logger)
-		}
 		return nil
 	}
 	configHandler.SetVulnerabilityToolRegistrar(vulnerabilityRegistrar)
@@ -548,6 +548,8 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 		terminalHandler,
 		app.c2Handler,
 		auditHandler,
+		auditSvc,
+		rbacHandler,
 		mcpServer,
 		authManager,
 		openAPIHandler,
@@ -560,17 +562,30 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 // mcpHandlerWithAuth 在鉴权通过后转发到 MCP 处理；若配置了 auth_header 则校验请求头，否则直接放行
 func (a *App) mcpHandlerWithAuth(w http.ResponseWriter, r *http.Request) {
 	cfg := a.config.MCP
-	if cfg.AuthHeader != "" {
-		actual := []byte(r.Header.Get(cfg.AuthHeader))
-		expected := []byte(cfg.AuthHeaderValue)
-		if subtle.ConstantTimeCompare(actual, expected) != 1 {
-			a.logger.Logger.Debug("MCP 鉴权失败：header 缺失或值不匹配", zap.String("header", cfg.AuthHeader))
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"error":"unauthorized"}`))
+	if authHeader := strings.TrimSpace(r.Header.Get("Authorization")); len(authHeader) > 7 && strings.EqualFold(authHeader[:7], "Bearer ") {
+		if session, ok := a.auth.ValidateToken(strings.TrimSpace(authHeader[7:])); ok && session.Permissions["mcp:execute"] {
+			principal := authctx.NewPrincipalWithScopes(session.UserID, session.Username, session.Scope, session.Permissions, session.PermissionScopes)
+			a.mcpServer.HandleHTTP(w, r.WithContext(authctx.WithPrincipal(r.Context(), principal)))
 			return
 		}
 	}
+	if !cfg.AllowGlobalAccess || strings.TrimSpace(cfg.AuthHeader) == "" || strings.TrimSpace(cfg.AuthHeaderValue) == "" {
+		http.Error(w, "use an authorized user bearer token; global MCP service access is disabled", http.StatusUnauthorized)
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(r.Header.Get(cfg.AuthHeader)), []byte(cfg.AuthHeaderValue)) != 1 {
+		a.logger.Logger.Debug("MCP 鉴权失败：header 缺失或值不匹配", zap.String("header", cfg.AuthHeader))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":"unauthorized"}`))
+		return
+	}
+	permissions := make(map[string]bool, len(security.PermissionCatalog))
+	for permission := range security.PermissionCatalog {
+		permissions[permission] = true
+	}
+	principal := authctx.NewPrincipal("service:mcp", "mcp-service", database.RBACScopeAll, permissions)
+	r = r.WithContext(authctx.WithPrincipal(r.Context(), principal))
 	a.mcpServer.HandleHTTP(w, r)
 }
 
@@ -615,20 +630,20 @@ func (a *App) RunWithContext(ctx context.Context) error {
 		}
 		switch tlsMode {
 		case mainTLSFromFiles:
-			a.logger.Info("启动 HTTPS 主服务（已启用 HTTP/2 协商）",
+			a.logger.Debug("启动 HTTPS 主服务（已启用 HTTP/2 协商）",
 				zap.String("address", addr),
 				zap.String("cert", certFile),
 			)
 		case mainTLSInMemorySelfSigned:
-			a.logger.Info("启动 HTTPS 主服务（内存自签证书，仅测试；已启用 HTTP/2 协商）",
+			a.logger.Debug("启动 HTTPS 主服务（内存自签证书，仅测试；已启用 HTTP/2 协商）",
 				zap.String("address", addr),
 			)
 		}
 		if httpRedirect {
-			a.logger.Info("已启用 HTTP→HTTPS 自动跳转（同端口嗅探分流）", zap.String("address", addr))
+			a.logger.Debug("已启用 HTTP→HTTPS 自动跳转（同端口嗅探分流）", zap.String("address", addr))
 		}
 	} else {
-		a.logger.Info("启动 HTTP 主服务", zap.String("address", addr))
+		a.logger.Debug("启动 HTTP 主服务", zap.String("address", addr))
 	}
 
 	// 监听 context 取消，优雅关闭 HTTP 服务器
@@ -831,6 +846,8 @@ func setupRoutes(
 	terminalHandler *handler.TerminalHandler,
 	c2Handler *handler.C2Handler,
 	auditHandler *handler.AuditHandler,
+	auditSvc *audit.Service,
+	rbacHandler *handler.RBACHandler,
 	mcpServer *mcp.Server,
 	authManager *security.AuthManager,
 	openAPIHandler *handler.OpenAPIHandler,
@@ -840,11 +857,15 @@ func setupRoutes(
 
 	// 认证相关路由
 	authRoutes := api.Group("/auth")
+	loginRL := security.NewRateLimiter(10, 1*time.Minute)
 	{
-		authRoutes.POST("/login", authHandler.Login)
+		authRoutes.POST("/login", security.RateLimitMiddleware(loginRL), authHandler.Login)
 		authRoutes.POST("/logout", security.AuthMiddleware(authManager), authHandler.Logout)
-		authRoutes.POST("/change-password", security.AuthMiddleware(authManager), authHandler.ChangePassword)
+		authRoutes.POST("/change-password", security.AuthMiddleware(authManager), security.RequirePermission("auth:self"), authHandler.ChangePassword)
 		authRoutes.GET("/validate", security.AuthMiddleware(authManager), authHandler.Validate)
+		authRoutes.POST("/robot-binding-code", security.AuthMiddleware(authManager), security.RequirePermission("auth:self"), robotHandler.CreateRobotBindingCode)
+		authRoutes.GET("/robot-bindings", security.AuthMiddleware(authManager), security.RequirePermission("auth:self"), robotHandler.ListMyRobotBindings)
+		authRoutes.DELETE("/robot-bindings/:id", security.AuthMiddleware(authManager), security.RequirePermission("auth:self"), robotHandler.DeleteMyRobotBinding)
 	}
 
 	// 机器人回调（无需登录，供企业微信/钉钉/飞书服务器调用）
@@ -861,7 +882,31 @@ func setupRoutes(
 
 	protected := api.Group("")
 	protected.Use(security.AuthMiddleware(authManager))
+	protected.Use(security.RBACMiddlewareWithDenyHook(app.db, func(c *gin.Context, reason, permission string) {
+		if auditSvc != nil {
+			auditSvc.Record(c, audit.Entry{
+				Level: "warn", Category: "rbac", Action: "access_denied", Result: "failure",
+				Message: "RBAC 拒绝访问", ResourceType: "route", ResourceID: c.FullPath(),
+				Detail: map[string]interface{}{"reason": reason, "permission": permission, "method": c.Request.Method},
+			})
+		}
+	}))
 	{
+		protected.GET("/rbac/me", rbacHandler.Me)
+		protected.GET("/rbac/metadata", rbacHandler.Metadata)
+		protected.GET("/rbac/users", rbacHandler.ListUsers)
+		protected.POST("/rbac/users", rbacHandler.CreateUser)
+		protected.PUT("/rbac/users/:id", rbacHandler.UpdateUser)
+		protected.DELETE("/rbac/users/:id", rbacHandler.DeleteUser)
+		protected.GET("/rbac/roles", rbacHandler.ListRoles)
+		protected.POST("/rbac/roles", rbacHandler.CreateRole)
+		protected.PUT("/rbac/roles/:id", rbacHandler.UpdateRole)
+		protected.DELETE("/rbac/roles/:id", rbacHandler.DeleteRole)
+		protected.GET("/rbac/resource-assignments", rbacHandler.ListResourceAssignments)
+		protected.GET("/rbac/resources", rbacHandler.ListAssignableResources)
+		protected.POST("/rbac/resource-assignments", rbacHandler.AssignResource)
+		protected.DELETE("/rbac/resource-assignments/:id", rbacHandler.DeleteResourceAssignment)
+
 		// 机器人测试（需登录）：POST /api/robot/test，body: {"platform":"dingtalk","user_id":"test","text":"帮助"}，用于验证机器人逻辑
 		protected.POST("/robot/test", robotHandler.HandleRobotTest)
 
@@ -1458,7 +1503,7 @@ func registerWebshellTools(mcpServer *mcp.Server, db *database.DB, webshellHandl
 	}
 	mcpServer.RegisterTool(writeTool, writeHandler)
 
-	logger.Info("WebShell 工具注册成功")
+	logger.Debug("WebShell 工具注册成功")
 }
 
 // registerWebshellManagementTools 注册 WebShell 连接管理 MCP 工具
@@ -1479,7 +1524,13 @@ func registerWebshellManagementTools(mcpServer *mcp.Server, db *database.DB, web
 		},
 	}
 	listHandler := func(ctx context.Context, args map[string]interface{}) (*mcp.ToolResult, error) {
-		connections, err := db.ListWebshellConnections()
+		connections := []database.WebShellConnection{}
+		var err error
+		if principal, ok := authctx.PrincipalFromContext(ctx); ok {
+			connections, err = db.ListWebshellConnectionsForAccess(principal.UserID, principal.ScopeFor("webshell:read"))
+		} else {
+			return &mcp.ToolResult{Content: []mcp.Content{{Type: "text", Text: "缺少认证身份"}}, IsError: true}, nil
+		}
 		if err != nil {
 			return &mcp.ToolResult{
 				Content: []mcp.Content{{Type: "text", Text: "获取连接列表失败: " + err.Error()}},
@@ -1593,6 +1644,10 @@ func registerWebshellManagementTools(mcpServer *mcp.Server, db *database.DB, web
 				Content: []mcp.Content{{Type: "text", Text: "添加 WebShell 连接失败: " + err.Error()}},
 				IsError: true,
 			}, nil
+		}
+		if principal, ok := authctx.PrincipalFromContext(ctx); ok {
+			_ = db.SetResourceOwner("webshell", conn.ID, principal.UserID)
+			_ = db.AssignResourceToUser(principal.UserID, "webshell", conn.ID)
 		}
 
 		return &mcp.ToolResult{
@@ -1819,7 +1874,7 @@ func registerWebshellManagementTools(mcpServer *mcp.Server, db *database.DB, web
 	}
 	mcpServer.RegisterTool(testTool, testHandler)
 
-	logger.Info("WebShell 管理工具注册成功")
+	logger.Debug("WebShell 管理工具注册成功")
 }
 
 // initializeKnowledge 初始化知识库组件（用于动态初始化）
@@ -1989,8 +2044,17 @@ func initializeKnowledge(
 // corsMiddleware CORS中间件
 func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		origin := strings.TrimSpace(c.GetHeader("Origin"))
+		if origin != "" {
+			parsed, err := url.Parse(origin)
+			if err != nil || parsed.Host == "" || !strings.EqualFold(parsed.Host, c.Request.Host) {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "cross-origin request denied"})
+				return
+			}
+			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+			c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+			c.Writer.Header().Add("Vary", "Origin")
+		}
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
 

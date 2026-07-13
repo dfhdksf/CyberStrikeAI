@@ -120,6 +120,9 @@ type ChatMessage struct {
 	ToolName string `json:"tool_name,omitempty"`
 	// ReasoningContent 对应 OpenAI/DeepSeek 的 reasoning_content；思考模式 + 工具调用后续跑须回传（见 DeepSeek 文档）。
 	ReasoningContent string `json:"reasoning_content,omitempty"`
+	// ModelFacingTrace is runtime-only metadata: true means Content was already the exact
+	// payload seen at the model boundary and must be restored byte-for-byte.
+	ModelFacingTrace bool `json:"-"`
 }
 
 // MarshalJSON 自定义JSON序列化，将tool_calls中的arguments转换为JSON字符串
@@ -660,7 +663,7 @@ func (a *Agent) UpdateToolDescriptionMode(mode string) {
 		mode = "short"
 	}
 	a.toolDescriptionMode = mode
-	a.logger.Info("Agent工具描述模式已更新", zap.String("tool_description_mode", mode))
+	a.logger.Debug("Agent工具描述模式已更新", zap.String("tool_description_mode", mode))
 }
 
 // RepairOrphanToolMessages 清理失去配对的tool消息和未完成的tool_calls，避免OpenAI报错
@@ -782,25 +785,25 @@ func (a *Agent) ExecuteMCPToolForConversation(ctx context.Context, conversationI
 }
 
 // BeginLocalToolExecution 在非 CallTool 路径工具开始时写入 running 状态，供 MCP 监控页展示「执行中」。
-func (a *Agent) BeginLocalToolExecution(toolName string, args map[string]interface{}) string {
+func (a *Agent) BeginLocalToolExecution(ctx context.Context, toolName string, args map[string]interface{}) string {
 	if a == nil || a.mcpServer == nil {
 		return ""
 	}
-	return a.mcpServer.BeginToolExecution(toolName, args)
+	return a.mcpServer.BeginToolExecution(ctx, toolName, args)
 }
 
 // FinishLocalToolExecution 完成 BeginLocalToolExecution 创建的记录；executionID 为空时一次性写入已完成记录。
-func (a *Agent) FinishLocalToolExecution(executionID, toolName string, args map[string]interface{}, resultText string, invokeErr error) string {
+func (a *Agent) FinishLocalToolExecution(ctx context.Context, executionID, toolName string, args map[string]interface{}, resultText string, invokeErr error) string {
 	if a == nil || a.mcpServer == nil {
 		return ""
 	}
-	return a.mcpServer.FinishToolExecution(executionID, toolName, args, resultText, invokeErr)
+	return a.mcpServer.FinishToolExecution(ctx, executionID, toolName, args, resultText, invokeErr)
 }
 
 // RecordLocalToolExecution 将非 CallTool 路径完成的工具调用写入 MCP 监控库（与 CallTool 落库一致），返回 executionId。
 // 用于 Eino filesystem execute 等场景，使助手气泡「渗透测试详情」与常规 MCP 一致可点进监控。
-func (a *Agent) RecordLocalToolExecution(toolName string, args map[string]interface{}, resultText string, invokeErr error) string {
-	return a.FinishLocalToolExecution("", toolName, args, resultText, invokeErr)
+func (a *Agent) RecordLocalToolExecution(ctx context.Context, toolName string, args map[string]interface{}, resultText string, invokeErr error) string {
+	return a.FinishLocalToolExecution(ctx, "", toolName, args, resultText, invokeErr)
 }
 
 // UpdateMCPExecutionDisplayResult 将监控库中的工具结果更新为送入模型的展示正文（reduction 后）。
