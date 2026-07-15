@@ -82,6 +82,33 @@ func TestBuildBudgetedSummarizationModelInputKeepsRecentCompleteRounds(t *testin
 	if !strings.Contains(joined, "latest-user") || !strings.Contains(joined, "latest-tool-result") {
 		t.Fatalf("latest complete rounds missing: %s", joined)
 	}
+	for _, msg := range input {
+		if msg.Role == schema.Tool || len(msg.ToolCalls) > 0 {
+			t.Fatalf("summary input must use inert plaintext history, got role=%s tool_calls=%d", msg.Role, len(msg.ToolCalls))
+		}
+	}
+}
+
+func TestBuildBudgetedSummarizationModelInputNeutralizesMalformedToolCallProtocol(t *testing.T) {
+	call := assistantToolCallsMsg("", "broken")
+	call.ToolCalls[0].Function.Arguments = `{"command":"unterminated`
+	input, _, err := buildBudgetedSummarizationModelInput(
+		context.Background(), schema.SystemMessage("summary-system"), schema.UserMessage("summary-instruction"),
+		[]adk.Message{schema.UserMessage("run it"), call, schema.ToolMessage("parse failed", "broken")},
+		einoSummarizationTokenCounter("gpt-4o"), 4096, summarizationInputBudgetOpts{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := formatSummarizationTranscript(input)
+	if !strings.Contains(joined, `unterminated`) || !strings.Contains(joined, "parse failed") {
+		t.Fatalf("historical evidence missing from plaintext transcript: %s", joined)
+	}
+	for _, msg := range input {
+		if msg.Role == schema.Tool || len(msg.ToolCalls) != 0 {
+			t.Fatalf("provider-visible tool protocol leaked into summary input: %+v", msg)
+		}
+	}
 }
 
 func TestSplitMessagesIntoRounds_Complex(t *testing.T) {

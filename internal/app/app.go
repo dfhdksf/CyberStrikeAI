@@ -66,6 +66,7 @@ type App struct {
 	slackCancel        context.CancelFunc        // Slack Socket Mode 取消函数
 	discordCancel      context.CancelFunc        // Discord Gateway 取消函数
 	qqCancel           context.CancelFunc        // QQ WebSocket 取消函数
+	alertCancel        context.CancelFunc        // 漏洞提醒持久化投递 worker
 	c2Manager          *c2.Manager               // C2 管理器（未启用 C2 时为 nil）
 	c2Watchdog         *c2.SessionWatchdog       // C2 会话看门狗
 	c2WatchdogCancel   context.CancelFunc        // 看门狗取消函数
@@ -83,7 +84,7 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 	router := gin.Default()
 
 	// CORS中间件
-	router.Use(corsMiddleware())
+	router.Use(corsMiddleware(cfg.Server.CORSAllowedOrigins))
 
 	// 初始化数据库
 	dbPath := cfg.Database.Path
@@ -119,6 +120,18 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 	audit.RegisterConversationCreateHook(auditSvc)
 	auditSvc.PurgeExpired()
 	audit.StartRetentionLoop(auditSvc, log.Logger)
+	if err := db.PurgeWorkflowPackageLifecycle(time.Now().UTC()); err != nil {
+		log.Logger.Warn("清理过期工作流包记录失败", zap.Error(err))
+	}
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := db.PurgeWorkflowPackageLifecycle(time.Now().UTC()); err != nil {
+				log.Logger.Warn("清理过期工作流包记录失败", zap.Error(err))
+			}
+		}
+	}()
 
 	monitorRetention := monitor.NewService(db, cfg, log.Logger)
 	monitorRetention.PurgeExpired()
@@ -416,6 +429,7 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 	auditHandler := handler.NewAuditHandler(db, auditSvc, log.Logger)
 	robotHandler := handler.NewRobotHandler(cfg, db, agentHandler, log.Logger)
 	robotHandler.SetAudit(auditSvc)
+	db.SetVulnerabilityCreatedHook(robotHandler.NotifyNewVulnerability)
 	openAPIHandler := handler.NewOpenAPIHandler(db, log.Logger, conversationHandler, agentHandler)
 
 	// 创建 App 实例（部分字段稍后填充）
@@ -444,6 +458,9 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 	}
 	// 飞书/钉钉长连接（无需公网），启用时在后台启动；后续前端应用配置时会通过 RestartRobotConnections 重启
 	app.startRobotConnections()
+	alertCtx, alertCancel := context.WithCancel(context.Background())
+	app.alertCancel = alertCancel
+	go robotHandler.RunVulnerabilityAlertWorker(alertCtx)
 
 	// 设置漏洞工具注册器（内置工具，必须设置）
 	vulnerabilityRegistrar := func() error {
@@ -705,6 +722,10 @@ func (a *App) Shutdown() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	_ = einoobserve.ShutdownOtel(shutdownCtx)
 	shutdownCancel()
+	if a.alertCancel != nil {
+		a.alertCancel()
+		a.alertCancel = nil
+	}
 
 	// 停止钉钉/飞书长连接
 	a.robotMu.Lock()
@@ -1194,6 +1215,8 @@ func setupRoutes(
 		protected.DELETE("/vulnerabilities/batch", vulnerabilityHandler.BatchDeleteVulnerabilities)
 		protected.GET("/vulnerabilities/filter-options", vulnerabilityHandler.GetVulnerabilityFilterOptions)
 		protected.GET("/vulnerabilities/stats", vulnerabilityHandler.GetVulnerabilityStats)
+		protected.GET("/vulnerability-alerts/subscription", vulnerabilityHandler.GetMyAlertSubscription)
+		protected.PUT("/vulnerability-alerts/subscription", vulnerabilityHandler.UpdateMyAlertSubscription)
 		protected.GET("/vulnerabilities/:id", vulnerabilityHandler.GetVulnerability)
 		protected.POST("/vulnerabilities", vulnerabilityHandler.CreateVulnerability)
 		protected.PUT("/vulnerabilities/:id", vulnerabilityHandler.UpdateVulnerability)
@@ -1296,13 +1319,18 @@ func setupRoutes(
 		protected.PUT("/roles/:name", roleHandler.UpdateRole)
 		protected.DELETE("/roles/:name", roleHandler.DeleteRole)
 
-		// 图编排 / 工作流定义（图结构固定，业务字段保存在 graph_json 中）
+		// 工作流定义（图结构固定，业务字段保存在 graph_json 中）
 		protected.GET("/workflows/runs/pending", workflowHandler.ListPendingRuns)
 		protected.GET("/workflows/runs/:runId/replay", workflowHandler.ReplayRun)
 		protected.GET("/workflows/runs/:runId", workflowHandler.GetRun)
 		protected.POST("/workflows/runs/:runId/resume", workflowHandler.ResumeRun)
 		protected.POST("/workflows/validate", workflowHandler.Validate)
 		protected.POST("/workflows/dry-run", workflowHandler.DryRun)
+		protected.GET("/workflows/:id/package", workflowHandler.ExportPackage)
+		protected.POST("/workflow-package-inspections", workflowHandler.CreatePackageInspection)
+		protected.GET("/workflow-package-inspections/:inspectionId", workflowHandler.GetPackageInspection)
+		protected.POST("/workflow-package-imports", workflowHandler.ApplyPackageImport)
+		protected.GET("/workflow-package-imports/:importId", workflowHandler.GetPackageImport)
 		protected.GET("/workflows", workflowHandler.List)
 		protected.GET("/workflows/:id", workflowHandler.Get)
 		protected.POST("/workflows", workflowHandler.Create)
@@ -2041,22 +2069,36 @@ func initializeKnowledge(
 	return knowledgeHandler, nil
 }
 
-// corsMiddleware CORS中间件
-func corsMiddleware() gin.HandlerFunc {
+// corsMiddleware allows same-origin requests, valid Chromium extension
+// origins, and exact origins explicitly configured by the operator. CORS is
+// not an authentication boundary; API access still requires a valid session.
+func corsMiddleware(configuredOrigins []string) gin.HandlerFunc {
+	allowedOrigins := make(map[string]struct{}, len(configuredOrigins))
+	for _, origin := range configuredOrigins {
+		if normalized, ok := normalizeCORSOrigin(origin); ok {
+			allowedOrigins[normalized] = struct{}{}
+		}
+	}
+
 	return func(c *gin.Context) {
 		origin := strings.TrimSpace(c.GetHeader("Origin"))
 		if origin != "" {
-			parsed, err := url.Parse(origin)
-			if err != nil || parsed.Host == "" || !strings.EqualFold(parsed.Host, c.Request.Host) {
+			c.Writer.Header().Add("Vary", "Origin")
+			normalized, valid := normalizeCORSOrigin(origin)
+			_, explicitlyAllowed := allowedOrigins[normalized]
+			parsed, _ := url.Parse(origin)
+			sameHost := valid && strings.EqualFold(parsed.Host, c.Request.Host)
+			browserExtension := valid && isChromiumExtensionOrigin(parsed)
+			if !sameHost && !browserExtension && !explicitlyAllowed {
 				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "cross-origin request denied"})
 				return
 			}
 			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
 			c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-			c.Writer.Header().Add("Vary", "Origin")
 		}
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
+		c.Writer.Header().Set("Access-Control-Max-Age", "600")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -2065,4 +2107,38 @@ func corsMiddleware() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+// isChromiumExtensionOrigin accepts only Chrome's canonical 32-character
+// extension IDs (letters a-p). It does not allow arbitrary custom schemes or
+// web origins, and the extension must separately obtain host permission.
+func isChromiumExtensionOrigin(origin *url.URL) bool {
+	if origin == nil || !strings.EqualFold(origin.Scheme, "chrome-extension") || origin.Port() != "" {
+		return false
+	}
+	id := strings.ToLower(origin.Hostname())
+	if len(id) != 32 {
+		return false
+	}
+	for _, ch := range id {
+		if ch < 'a' || ch > 'p' {
+			return false
+		}
+	}
+	return true
+}
+
+// normalizeCORSOrigin validates and canonicalizes a serialized origin. CORS
+// origins never contain credentials, paths, query strings, or fragments.
+func normalizeCORSOrigin(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "*" || strings.EqualFold(raw, "null") {
+		return "", false
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil ||
+		(parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", false
+	}
+	return strings.ToLower(parsed.Scheme) + "://" + strings.ToLower(parsed.Host), true
 }

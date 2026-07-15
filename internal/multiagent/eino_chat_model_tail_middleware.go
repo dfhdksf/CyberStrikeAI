@@ -13,14 +13,16 @@ import (
 // Order (best practice):
 //  1. system merge — accurate token count for summarization
 //  2. continuation user dedup — drop stale session-resume injections
-//  3. pre-summarization tool-call/result reconciliation
-//  4. summarization
-//  5. soft model-input budget (warn/compact only, never fail locally)
-//  6. final tool-call/result reconciliation
-//  7. orphan tool prune (defense in depth)
-//  8. malformed tool_search history repair
-//  9. telemetry
-//  10. model-facing trace snapshot
+//  3. malformed tool-call arguments repair
+//  4. pre-summarization tool-call/result reconciliation
+//  5. summarization
+//  6. soft model-input budget (warn/compact only, never fail locally)
+//  7. final malformed tool-call arguments repair
+//  8. final tool-call/result reconciliation
+//  9. orphan tool prune (defense in depth)
+//  10. malformed tool_search history repair
+//  11. telemetry
+//  12. model-facing trace snapshot
 type einoChatModelTailConfig struct {
 	logger           *zap.Logger
 	phase            string
@@ -30,6 +32,7 @@ type einoChatModelTailConfig struct {
 	toolMaxBytes     int
 	conversationID   string
 	trace            *modelFacingTraceHolder
+	middlewareConfig *config.MultiAgentEinoMiddlewareConfig
 	skipOrphanPruner bool
 	skipTelemetry    bool
 	skipTrace        bool
@@ -38,6 +41,7 @@ type einoChatModelTailConfig struct {
 func appendEinoChatModelTailMiddlewares(handlers []adk.ChatModelAgentMiddleware, cfg einoChatModelTailConfig) []adk.ChatModelAgentMiddleware {
 	handlers = append(handlers, newSystemMessageNormalizerMiddleware(cfg.logger, cfg.phase))
 	handlers = append(handlers, newContinuationUserDedupMiddleware(cfg.logger, cfg.phase))
+	handlers = append(handlers, newToolCallArgumentsSanitizerMiddleware(cfg.logger, cfg.phase+"_pre_summarization"))
 	if cfg.summarization != nil {
 		// Summarization invokes the model internally, so its input needs the same
 		// structural guarantee as the agent's final model call.
@@ -45,6 +49,7 @@ func appendEinoChatModelTailMiddlewares(handlers []adk.ChatModelAgentMiddleware,
 		handlers = append(handlers, cfg.summarization)
 	}
 	handlers = append(handlers, newModelInputSoftBudgetMiddleware(cfg.maxTotalTokens, cfg.toolMaxBytes, cfg.modelName, cfg.logger, cfg.phase))
+	handlers = append(handlers, newToolCallArgumentsSanitizerMiddleware(cfg.logger, cfg.phase))
 	handlers = append(handlers, newToolPairReconcilerMiddleware(cfg.logger, cfg.phase))
 	if !cfg.skipOrphanPruner {
 		handlers = append(handlers, newOrphanToolPrunerMiddleware(cfg.logger, cfg.phase))
@@ -60,6 +65,7 @@ func appendEinoChatModelTailMiddlewares(handlers []adk.ChatModelAgentMiddleware,
 			handlers = append(handlers, capMw)
 		}
 	}
+	handlers = append(handlers, newModelOutputGuardMiddleware(cfg.middlewareConfig, cfg.logger, cfg.phase))
 	return handlers
 }
 

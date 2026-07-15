@@ -158,6 +158,9 @@ HTTP/2 伪首部。展示与 AI Prompt 已归一化为 HTTP/1.1；原始 HAR 仍
 **Console 里 localhost CORS 报错是插件造成的吗？**  
 不是。那是页面自身请求本机服务被浏览器拦截，与扩展无关。
 
+**Validate 显示 `cross-origin request denied`？**  
+升级并重启 CyberStrikeAI 服务。新版服务会自动识别格式合法的 Chrome/Edge 扩展 Origin，无需复制插件 ID 或配置 CORS 白名单；插件首次 Validate 时仍会请求访问目标服务地址的浏览器权限。
+
 **Test History 很多会挡住 Captured Requests 吗？**  
 不会。历史区最高占侧边栏 **42%**，超出部分区域内滚动；捕获区占剩余空间。
 

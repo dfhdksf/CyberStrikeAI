@@ -78,7 +78,7 @@ type einoADKRunLoopArgs struct {
 	StreamsMainAssistant func(agent string) bool
 	EinoRoleTag          func(agent string) string
 	CheckpointDir        string
-	// RunRetryMaxAttempts / RunRetryMaxBackoffSec：429、5xx、网络抖动时的指数退避续跑（0=默认 10 次 / 30s 上限）。
+	// RunRetryMaxAttempts / RunRetryMaxBackoffSec：429、5xx、网络抖动时的指数退避续跑（0=默认 4 次 / 30s 上限）。
 	RunRetryMaxAttempts   int
 	RunRetryMaxBackoffSec int
 
@@ -500,6 +500,38 @@ func runEinoADKAgentLoop(ctx context.Context, args *einoADKRunLoopArgs, baseMsgs
 	maybeRetryTransientRun := func(runErr error) (restarted bool, fatal error) {
 		if runErr == nil {
 			return false, nil
+		}
+		var rejected *modelOutputRejectedError
+		if errors.As(runErr, &rejected) {
+			if progress != nil {
+				progress("model_output_rejected", "模型输出不完整或工具参数不安全，已阻止执行。", map[string]interface{}{
+					"conversationId":   conversationID,
+					"source":           "eino",
+					"orchestration":    orchMode,
+					"reason":           rejected.Reason,
+					"finishReason":     rejected.FinishReason,
+					"toolName":         rejected.ToolName,
+					"toolCallId":       rejected.ToolCallID,
+					"argumentsBytes":   rejected.ArgumentsBytes,
+					"completionTokens": rejected.CompletionTokens,
+					"reasoningTokens":  rejected.ReasoningTokens,
+					"repairAttempt":    rejected.RepairAttempt,
+					"repairable":       rejected.Repairable,
+				})
+			}
+			if !rejected.Repairable {
+				return false, handleRunErr(runErr)
+			}
+			restartMsgs, ctxSource := einoMessagesForRunRestart(args, baseMsgs, runAccumulatedMsgs, baseAccumulatedCount)
+			restartMsgs = append(restartMsgs, schema.UserMessage(modelOutputRepairInstruction))
+			if logger != nil {
+				logger.Warn("eino model output rejected, retrying once with concise instruction",
+					zap.Error(runErr), zap.String("orchestration", orchMode),
+					zap.String("contextSource", string(ctxSource)), zap.Int("repairAttempt", rejected.RepairAttempt))
+			}
+			msgs = restartMsgs
+			iter = startRunnerIter(msgs)
+			return true, nil
 		}
 		if isEinoContextOverflowError(runErr) && !contextOverflowRetried {
 			contextOverflowRetried = true
@@ -996,6 +1028,19 @@ func runEinoADKAgentLoop(ctx context.Context, args *einoADKRunLoopArgs, baseMsgs
 			if merged := mergeStreamingToolCallFragments(toolStreamFragments); len(merged) > 0 {
 				lastToolChunk = mergeMessageToolCalls(&schema.Message{ToolCalls: merged})
 			}
+			if progress != nil && lastToolChunk != nil {
+				for _, tc := range lastToolChunk.ToolCalls {
+					if marker, ok := modelOutputRecoveryFromToolCall(tc); ok {
+						progress("model_output_rejected", "模型工具调用不完整或参数不安全，已阻止执行并要求重写。", map[string]interface{}{
+							"conversationId": conversationID, "source": "eino", "orchestration": orchMode,
+							"reason": marker.Reason, "finishReason": marker.FinishReason,
+							"toolName": tc.Function.Name, "toolCallId": tc.ID,
+							"argumentsBytes": marker.ArgumentsBytes, "completionTokens": marker.CompletionTokens,
+							"reasoningTokens": marker.ReasoningTokens, "repairAttempt": marker.RepairAttempt,
+						})
+					}
+				}
+			}
 			tryEmitToolCallsOnce(lastToolChunk, ev.AgentName, orchestratorName, conversationID, orchMode, progress, toolEmitSeen, subAgentToolStep, mainAgentToolStep, markPendingWithMonitor)
 			// 流式路径此前只把 tool_calls 推给进度 UI，未写入 runAccumulatedMsgs；落库后 loadHistory→RepairOrphan 会删掉全部 tool 结果，表现为「续跑/下轮失忆」。
 			if lastToolChunk != nil && len(lastToolChunk.ToolCalls) > 0 {
@@ -1031,6 +1076,19 @@ func runEinoADKAgentLoop(ctx context.Context, args *einoADKRunLoopArgs, baseMsgs
 			continue
 		}
 		runAccumulatedMsgs = append(runAccumulatedMsgs, msg)
+		if progress != nil {
+			for _, tc := range msg.ToolCalls {
+				if marker, ok := modelOutputRecoveryFromToolCall(tc); ok {
+					progress("model_output_rejected", "模型工具调用不完整或参数不安全，已阻止执行并要求重写。", map[string]interface{}{
+						"conversationId": conversationID, "source": "eino", "orchestration": orchMode,
+						"reason": marker.Reason, "finishReason": marker.FinishReason,
+						"toolName": tc.Function.Name, "toolCallId": tc.ID,
+						"argumentsBytes": marker.ArgumentsBytes, "completionTokens": marker.CompletionTokens,
+						"reasoningTokens": marker.ReasoningTokens, "repairAttempt": marker.RepairAttempt,
+					})
+				}
+			}
+		}
 		tryEmitToolCallsOnce(mergeMessageToolCalls(msg), ev.AgentName, orchestratorName, conversationID, orchMode, progress, toolEmitSeen, subAgentToolStep, mainAgentToolStep, markPendingWithMonitor)
 
 		if mv.Role == schema.Assistant {

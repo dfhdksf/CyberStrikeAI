@@ -58,6 +58,7 @@ type DB struct {
 	checkpointDone           chan struct{}
 	closeOnce                sync.Once
 	closeErr                 error
+	vulnerabilityCreatedHook func(*Vulnerability)
 }
 
 // startPassiveCheckpointLoop 启动后台 PASSIVE checkpoint 循环。
@@ -404,6 +405,33 @@ func (db *DB) initTables() error {
 		FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE SET NULL
 	);`
 
+	createVulnerabilityAlertSubscriptionsTable := `
+	CREATE TABLE IF NOT EXISTS vulnerability_alert_subscriptions (
+		user_id TEXT PRIMARY KEY,
+		enabled INTEGER NOT NULL DEFAULT 0,
+		min_severity TEXT NOT NULL DEFAULT 'high',
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (user_id) REFERENCES rbac_users(id) ON DELETE CASCADE
+	);`
+	createVulnerabilityAlertDeliveriesTable := `
+	CREATE TABLE IF NOT EXISTS vulnerability_alert_deliveries (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		vulnerability_id TEXT NOT NULL,
+		user_id TEXT NOT NULL,
+		platform TEXT NOT NULL,
+		external_user_id TEXT NOT NULL,
+		status TEXT NOT NULL DEFAULT 'pending',
+		attempts INTEGER NOT NULL DEFAULT 0,
+		next_attempt_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		last_error TEXT NOT NULL DEFAULT '',
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(vulnerability_id, platform, external_user_id),
+		FOREIGN KEY (vulnerability_id) REFERENCES vulnerabilities(id) ON DELETE CASCADE,
+		FOREIGN KEY (user_id) REFERENCES rbac_users(id) ON DELETE CASCADE
+	);`
+
 	// 创建批量任务队列表
 	createBatchTaskQueuesTable := `
 	CREATE TABLE IF NOT EXISTS batch_task_queues (
@@ -639,6 +667,28 @@ func (db *DB) initTables() error {
 		FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
 	);`
 
+	createWorkflowPackageInspectionsTable := `
+	CREATE TABLE IF NOT EXISTS workflow_package_inspections (
+		id TEXT PRIMARY KEY, package_hash TEXT NOT NULL, manifest_json TEXT NOT NULL,
+		workflow_payload_json TEXT NOT NULL, inspection_json TEXT NOT NULL,
+		source_workflow_id TEXT NOT NULL, source_revision INTEGER NOT NULL,
+		source_content_hash TEXT NOT NULL, source_graph_hash TEXT NOT NULL,
+		local_conflict_state TEXT NOT NULL CHECK (local_conflict_state IN ('none','identical','id_conflict')),
+		local_workflow_id TEXT, local_content_hash TEXT, local_graph_hash TEXT,
+		created_by TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'ready' CHECK (status IN ('ready','consumed','expired')),
+		created_at DATETIME NOT NULL, expires_at DATETIME NOT NULL, consumed_at DATETIME
+	);`
+	createWorkflowPackageImportsTable := `
+	CREATE TABLE IF NOT EXISTS workflow_package_imports (
+		id TEXT PRIMARY KEY, inspection_id TEXT NOT NULL, request_hash TEXT NOT NULL,
+		idempotency_key TEXT NOT NULL, actor_user_id TEXT NOT NULL,
+		action TEXT NOT NULL CHECK (action IN ('create','keep_existing','overwrite','rename')),
+		source_workflow_id TEXT NOT NULL, target_workflow_id TEXT NOT NULL, resulting_workflow_id TEXT,
+		result TEXT NOT NULL CHECK (result IN ('created','overwritten','renamed','kept_existing','skipped_identical','failed')),
+		error_code TEXT, error_message TEXT, created_at DATETIME NOT NULL, applied_at DATETIME,
+		FOREIGN KEY (inspection_id) REFERENCES workflow_package_inspections(id)
+	);`
+
 	// 创建索引
 	createIndexes := `
 	CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);
@@ -703,6 +753,9 @@ func (db *DB) initTables() error {
 	CREATE INDEX IF NOT EXISTS idx_workflow_runs_conversation ON workflow_runs(conversation_id);
 	CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
 	CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_run ON workflow_node_runs(run_id);
+	CREATE INDEX IF NOT EXISTS idx_workflow_package_inspections_creator_expiry ON workflow_package_inspections(created_by, expires_at);
+	CREATE UNIQUE INDEX IF NOT EXISTS uq_workflow_package_imports_actor_key ON workflow_package_imports(actor_user_id, idempotency_key);
+	CREATE UNIQUE INDEX IF NOT EXISTS uq_workflow_package_imports_inspection_success ON workflow_package_imports(inspection_id) WHERE result IN ('created','overwritten','renamed','kept_existing','skipped_identical');
 	`
 
 	if _, err := db.Exec(createConversationsTable); err != nil {
@@ -794,11 +847,19 @@ func (db *DB) initTables() error {
 	if err := db.initRBACTables(); err != nil {
 		return fmt.Errorf("创建RBAC表失败: %w", err)
 	}
+	if _, err := db.Exec(createVulnerabilityAlertSubscriptionsTable); err != nil {
+		return fmt.Errorf("创建漏洞提醒订阅表失败: %w", err)
+	}
+	if _, err := db.Exec(createVulnerabilityAlertDeliveriesTable); err != nil {
+		return fmt.Errorf("创建漏洞提醒投递表失败: %w", err)
+	}
 
 	for tableName, ddl := range map[string]string{
-		"workflow_definitions": createWorkflowDefinitionsTable,
-		"workflow_runs":        createWorkflowRunsTable,
-		"workflow_node_runs":   createWorkflowNodeRunsTable,
+		"workflow_definitions":         createWorkflowDefinitionsTable,
+		"workflow_runs":                createWorkflowRunsTable,
+		"workflow_node_runs":           createWorkflowNodeRunsTable,
+		"workflow_package_inspections": createWorkflowPackageInspectionsTable,
+		"workflow_package_imports":     createWorkflowPackageImportsTable,
 	} {
 		if _, err := db.Exec(ddl); err != nil {
 			return fmt.Errorf("创建%s表失败: %w", tableName, err)

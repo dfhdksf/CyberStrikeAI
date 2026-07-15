@@ -14,7 +14,7 @@ flowchart LR
     M --> T["内置工具 / YAML 工具 / Skills FS"]
     M --> EM["外部 MCP"]
     A --> K["知识库检索"]
-    H --> W["Workflow 图编排"]
+    H --> W["Workflow 工作流"]
     H --> C2["内置 C2"]
     H --> WS["WebShell"]
     H --> AU["Audit / Monitor"]
@@ -73,9 +73,9 @@ MCP 相关：
 
 ## Workflow
 
-图编排在 `internal/workflow/`，HTTP 入口在 `internal/handler/workflow*.go`。它支持 start、agent、tool、condition、hitl、output、end 等节点。
+工作流引擎在 `internal/workflow/`，HTTP 入口在 `internal/handler/workflow*.go`。它支持 start、agent、tool、condition、hitl、output、end 等节点。
 
-详细使用见 [图编排使用说明](workflow-graph.md)。
+详细使用见 [工作流使用说明](workflow-graph.md)。
 
 ## 知识库
 

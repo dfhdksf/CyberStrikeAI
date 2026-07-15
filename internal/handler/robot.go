@@ -65,6 +65,7 @@ const (
 	robotCmdDoctor        = "诊断"
 	robotCmdConfirm       = "确认"
 	robotCmdCancel        = "取消"
+	robotCmdVulnAlerts    = "漏洞提醒"
 	robotBindingCodeTTL   = 5 * time.Minute
 )
 
@@ -88,6 +89,7 @@ type RobotHandler struct {
 	runningCancels       map[string]context.CancelFunc // key: "platform_userID", 用于停止命令中断任务
 	wecomReplay          map[string]time.Time
 	pendingConfirmations map[string]robotPendingConfirmation
+	alertWake            chan struct{}
 	audit                *audit.Service
 }
 
@@ -104,6 +106,7 @@ func NewRobotHandler(cfg *config.Config, db *database.DB, agentHandler *AgentHan
 		runningCancels:       make(map[string]context.CancelFunc),
 		wecomReplay:          make(map[string]time.Time),
 		pendingConfirmations: make(map[string]robotPendingConfirmation),
+		alertWake:            make(chan struct{}, 1),
 	}
 }
 
@@ -489,6 +492,9 @@ func (h *RobotHandler) cmdHelp(platform, userID string) string {
 	}
 	if can("agent:execute") {
 		b.WriteString("\n【模式 Mode】\n· 模式 / modes — 列出对话模式与当前选择\n· 模式 <名称> / mode <name> — 切换对话模式\n· 停止 / stop — 中断当前任务\n")
+	}
+	if can("vulnerability:read") {
+		b.WriteString("\n【漏洞提醒 Vulnerability alerts】\n· 漏洞提醒 — 查看订阅状态\n· 漏洞提醒 开启 / vuln alerts on — 开启提醒\n· 漏洞提醒 仅严重|高危以上|中危以上 / vuln alerts critical|high|medium — 设置最低级别\n· 漏洞提醒 关闭 / vuln alerts off — 关闭提醒\n")
 	}
 	b.WriteString("\n【诊断 Diagnostics】\n")
 	b.WriteString("· 权限 / permissions — 查看当前业务权限\n")
@@ -1110,6 +1116,9 @@ func robotCommandPermission(text string) (string, bool) {
 		return "config:read", true
 	case text == robotCmdProjects || text == robotCmdProjectsList || text == "projects":
 		return "project:read", true
+	case text == robotCmdVulnAlerts || strings.HasPrefix(text, robotCmdVulnAlerts+" "),
+		text == "vuln alerts" || strings.HasPrefix(text, "vuln alerts "):
+		return "vulnerability:read", true
 	case text == robotCmdUnbindProject || text == "unbind project",
 		strings.HasPrefix(text, robotCmdNewProject+" "), strings.HasPrefix(text, "new project "),
 		strings.HasPrefix(text, robotCmdBindProject+" "), strings.HasPrefix(text, "bind project "):
@@ -1253,6 +1262,12 @@ func (h *RobotHandler) handleRobotCommand(platform, userID, text string) (string
 		}
 	}
 	switch {
+	case text == robotCmdVulnAlerts || text == "vuln alerts":
+		return h.cmdVulnerabilityAlerts(platform, userID, ""), true
+	case strings.HasPrefix(text, robotCmdVulnAlerts+" "):
+		return h.cmdVulnerabilityAlerts(platform, userID, strings.TrimSpace(text[len(robotCmdVulnAlerts)+1:])), true
+	case strings.HasPrefix(text, "vuln alerts "):
+		return h.cmdVulnerabilityAlerts(platform, userID, strings.TrimSpace(text[len("vuln alerts "):])), true
 	case text == robotCmdHelp || text == "help" || text == "？" || text == "?":
 		return h.cmdHelp(platform, userID), true
 	case text == robotCmdIdentity || text == "whoami":

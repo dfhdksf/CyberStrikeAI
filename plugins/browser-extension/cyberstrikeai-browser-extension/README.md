@@ -51,6 +51,8 @@ Closing DevTools clears panel data. Closing the browser invalidates the session 
 
 After reloading the extension, close DevTools completely and reopen (F12) if you see `chrome.runtime.connect` errors — the old panel context is invalidated.
 
+If Validate reports `cross-origin request denied`, upgrade and restart the CyberStrikeAI server. Current versions recognize valid Chrome/Edge extension origins automatically, so no extension ID or CORS configuration is required. The browser will still request host access on the first Validate.
+
 ### Package
 
 ```bash

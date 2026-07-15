@@ -4,19 +4,25 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"cyberstrike-ai/internal/config"
 
+	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 )
 
 const (
-	defaultEinoRunRetryMaxAttempts = 10
+	defaultEinoRunRetryMaxAttempts = 4
 	defaultEinoRunRetryMaxBackoff  = 30 * time.Second
 )
+
+var httpStatusInErrorPattern = regexp.MustCompile(`(?i)(?:http|status(?:\s+code)?|upstream\s+returned)\s*[:=]?\s*(\d{3})\b`)
 
 // isEinoTransientRunError 是 Eino 运行期「可退避重试 vs 直接失败」的唯一判据。
 // 429/5xx/网络抖动等返回 true；用户取消、超时、迭代上限、鉴权失败等返回 false。
@@ -31,18 +37,22 @@ func isEinoTransientRunError(err error) bool {
 	if isEinoIterationLimitError(err) {
 		return false
 	}
+	var apiErr *einoopenai.APIError
+	if errors.As(err, &apiErr) && apiErr.HTTPStatusCode > 0 {
+		return isRetryableHTTPStatus(apiErr.HTTPStatusCode)
+	}
 	msg := strings.ToLower(strings.TrimSpace(err.Error()))
 	if msg == "" {
 		return false
 	}
+	if status := httpStatusFromErrorText(msg); status > 0 {
+		return isRetryableHTTPStatus(status)
+	}
 	transientMarkers := []string{
-		"406",
-		"429",
 		"too many requests",
 		"rate limit",
 		"rate_limit",
 		"ratelimit",
-		"quota exceeded",
 		"overloaded",
 		"capacity",
 		"temporarily unavailable",
@@ -66,12 +76,6 @@ func isEinoTransientRunError(err error) bool {
 		"unexpected eof",
 		`": eof`, // net/http: Post "url": EOF (often wraps io.EOF)
 		"unexpected end of json",
-		"status code: 406",
-		"status code: 502",
-		"502",
-		"503",
-		"504",
-		"500",
 	}
 	for _, m := range transientMarkers {
 		if strings.Contains(msg, m) {
@@ -79,6 +83,24 @@ func isEinoTransientRunError(err error) bool {
 		}
 	}
 	return false
+}
+
+func isRetryableHTTPStatus(status int) bool {
+	switch status {
+	case 408, 409, 425, 429:
+		return true
+	default:
+		return status >= 500 && status <= 599
+	}
+}
+
+func httpStatusFromErrorText(msg string) int {
+	match := httpStatusInErrorPattern.FindStringSubmatch(msg)
+	if len(match) != 2 {
+		return 0
+	}
+	status, _ := strconv.Atoi(match[1])
+	return status
 }
 
 type einoTransientRunRetryPolicy struct {
@@ -217,14 +239,22 @@ func appendUserMessageIfNeeded(msgs []adk.Message, userMessage string) []adk.Mes
 	return append(msgs, schema.UserMessage(userMessage))
 }
 
-// einoTransientRetryBackoff 指数退避：2s, 4s, 8s… capped by maxBackoff。
+// einoTransientRetryBackoff uses equal-jitter exponential backoff. Jitter avoids
+// synchronized retries when many conversations hit the same provider limit.
 func einoTransientRetryBackoff(attempt int, maxBackoff time.Duration) time.Duration {
 	if attempt < 0 {
 		attempt = 0
 	}
-	backoff := time.Duration(1<<uint(attempt+1)) * time.Second
-	if maxBackoff > 0 && backoff > maxBackoff {
-		backoff = maxBackoff
+	if attempt > 30 {
+		attempt = 30
 	}
-	return backoff
+	ceiling := time.Duration(1<<uint(attempt+1)) * time.Second
+	if maxBackoff > 0 && ceiling > maxBackoff {
+		ceiling = maxBackoff
+	}
+	if ceiling <= 1 {
+		return ceiling
+	}
+	half := ceiling / 2
+	return half + time.Duration(rand.Int64N(int64(ceiling-half)+1))
 }

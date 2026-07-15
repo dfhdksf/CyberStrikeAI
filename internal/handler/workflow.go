@@ -187,7 +187,7 @@ func (h *WorkflowHandler) save(c *gin.Context, pathID string) {
 	saved, _ := h.db.GetWorkflowDefinition(id)
 	workflowrunner.InvalidateCompiledCache(id)
 	if h.audit != nil {
-		h.audit.RecordOK(c, "workflow", "save", "保存图编排流程", "workflow", id, map[string]interface{}{"name": name})
+		h.audit.RecordOK(c, "workflow", "save", "保存工作流", "workflow", id, map[string]interface{}{"name": name})
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "工作流已保存", "workflow": saved})
 }
@@ -204,7 +204,7 @@ func (h *WorkflowHandler) Delete(c *gin.Context) {
 	}
 	workflowrunner.InvalidateCompiledCache(id)
 	if h.audit != nil {
-		h.audit.RecordOK(c, "workflow", "delete", "删除图编排流程", "workflow", id, nil)
+		h.audit.RecordOK(c, "workflow", "delete", "删除工作流", "workflow", id, nil)
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "工作流已删除"})
 }

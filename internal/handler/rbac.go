@@ -324,6 +324,7 @@ type assignResourceRequest struct {
 	ResourceType string   `json:"resource_type" binding:"required"`
 	ResourceID   string   `json:"resource_id"`
 	ResourceIDs  []string `json:"resource_ids"`
+	AutoDetect   bool     `json:"auto_detect"`
 }
 
 func (h *RBACHandler) AssignResource(c *gin.Context) {
@@ -340,21 +341,33 @@ func (h *RBACHandler) AssignResource(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "至少需要一个资源 ID"})
 		return
 	}
-	created, err := h.db.AssignResourcesToUser(req.UserID, req.ResourceType, resourceIDs)
+	var created int64
+	var detectedTypes map[string]string
+	var err error
+	if req.AutoDetect {
+		created, detectedTypes, err = h.db.AssignResourcesToUserAuto(req.UserID, resourceIDs)
+	} else {
+		created, err = h.db.AssignResourcesToUser(req.UserID, req.ResourceType, resourceIDs)
+	}
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if h.audit != nil {
 		for _, resourceID := range resourceIDs {
-			h.audit.RecordOK(c, "rbac", "assign_resource", "授权资源访问", req.ResourceType, strings.TrimSpace(resourceID), map[string]interface{}{"user_id": req.UserID})
+			resourceType := req.ResourceType
+			if detectedTypes != nil {
+				resourceType = detectedTypes[strings.TrimSpace(resourceID)]
+			}
+			h.audit.RecordOK(c, "rbac", "assign_resource", "授权资源访问", resourceType, strings.TrimSpace(resourceID), map[string]interface{}{"user_id": req.UserID})
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"success":   true,
-		"requested": len(resourceIDs),
-		"created":   created,
-		"skipped":   int64(len(resourceIDs)) - created,
+		"success":        true,
+		"requested":      len(resourceIDs),
+		"created":        created,
+		"skipped":        int64(len(resourceIDs)) - created,
+		"detected_types": detectedTypes,
 	})
 }
 
@@ -385,22 +398,32 @@ func (h *RBACHandler) ListAssignableResources(c *gin.Context) {
 	if hasMore {
 		resources = resources[:limit]
 	}
+	total, err := h.db.CountAssignableRBACResources(c.Query("type"), c.Query("q"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"resources": resources,
 		"has_more":  hasMore,
 		"limit":     limit,
 		"offset":    offset,
+		"total":     total,
 	})
 }
 
 func (h *RBACHandler) DeleteResourceAssignment(c *gin.Context) {
 	id := strings.TrimSpace(c.Param("id"))
-	if err := h.db.DeleteRBACResourceAssignment(id); err != nil {
+	assignment, err := h.db.DeleteRBACResourceAssignmentWithDetails(id)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if h.audit != nil {
-		h.audit.RecordOK(c, "rbac", "delete_resource_assignment", "撤销资源授权", "resource_assignment", id, nil)
+		h.audit.RecordOK(c, "rbac", "delete_resource_assignment", "撤销资源授权", assignment.ResourceType, assignment.ResourceID, map[string]interface{}{
+			"user_id":       assignment.UserID,
+			"assignment_id": assignment.ID,
+		})
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }

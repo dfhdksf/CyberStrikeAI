@@ -168,11 +168,13 @@ func RunDeepAgent(
 	httpClient = openai.NewEinoHTTPClient(&appCfg.OpenAI, httpClient)
 	openai.AttachSummarizationDiagTransport(httpClient, logger)
 
+	maxCompletionTokens := appCfg.OpenAI.MaxCompletionTokensEffective()
 	baseModelCfg := &einoopenai.ChatModelConfig{
-		APIKey:     appCfg.OpenAI.APIKey,
-		BaseURL:    strings.TrimSuffix(appCfg.OpenAI.BaseURL, "/"),
-		Model:      appCfg.OpenAI.Model,
-		HTTPClient: httpClient,
+		APIKey:              appCfg.OpenAI.APIKey,
+		BaseURL:             strings.TrimSuffix(appCfg.OpenAI.BaseURL, "/"),
+		Model:               appCfg.OpenAI.Model,
+		HTTPClient:          httpClient,
+		MaxCompletionTokens: &maxCompletionTokens,
 	}
 	reasoning.ApplyToEinoChatModelConfig(baseModelCfg, &appCfg.OpenAI, reasoningClient)
 
@@ -247,13 +249,14 @@ func RunDeepAgent(
 				subHandlers = append(subHandlers, einoSkillMW)
 			}
 			subHandlers = appendEinoChatModelTailMiddlewares(subHandlers, einoChatModelTailConfig{
-				logger:         logger,
-				phase:          "sub_agent:" + id,
-				summarization:  subSumMw,
-				modelName:      appCfg.OpenAI.Model,
-				maxTotalTokens: appCfg.OpenAI.MaxTotalTokens,
-				toolMaxBytes:   toolMaxBytesFromMW(&ma.EinoMiddleware),
-				conversationID: conversationID,
+				logger:           logger,
+				phase:            "sub_agent:" + id,
+				summarization:    subSumMw,
+				modelName:        appCfg.OpenAI.Model,
+				maxTotalTokens:   appCfg.OpenAI.MaxTotalTokens,
+				toolMaxBytes:     toolMaxBytesFromMW(&ma.EinoMiddleware),
+				conversationID:   conversationID,
+				middlewareConfig: &ma.EinoMiddleware,
 			})
 
 			subInstrFinal := project.AppendVisionImageAnalysisIfReady(instr, appCfg.Vision.Ready())
@@ -280,6 +283,7 @@ func RunDeepAgent(
 						Tools:               subToolsForCfg,
 						UnknownToolsHandler: einomcp.UnknownToolReminderHandler(),
 						ToolCallMiddlewares: []compose.ToolMiddleware{
+							modelOutputExecutionGuardMiddleware(),
 							localToolRBACMiddleware(),
 							hitlToolCallMiddleware(),
 							softRecoveryToolMiddleware(),
@@ -409,14 +413,15 @@ func RunDeepAgent(
 		deepHandlers = append(deepHandlers, einoSkillMW)
 	}
 	deepHandlers = appendEinoChatModelTailMiddlewares(deepHandlers, einoChatModelTailConfig{
-		logger:         logger,
-		phase:          "deep_orchestrator",
-		summarization:  mainSumMw,
-		modelName:      appCfg.OpenAI.Model,
-		maxTotalTokens: appCfg.OpenAI.MaxTotalTokens,
-		toolMaxBytes:   toolMaxBytesFromMW(&ma.EinoMiddleware),
-		conversationID: conversationID,
-		trace:          modelFacingTrace,
+		logger:           logger,
+		phase:            "deep_orchestrator",
+		summarization:    mainSumMw,
+		modelName:        appCfg.OpenAI.Model,
+		maxTotalTokens:   appCfg.OpenAI.MaxTotalTokens,
+		toolMaxBytes:     toolMaxBytesFromMW(&ma.EinoMiddleware),
+		conversationID:   conversationID,
+		trace:            modelFacingTrace,
+		middlewareConfig: &ma.EinoMiddleware,
 	})
 
 	supHandlers := []adk.ChatModelAgentMiddleware{}
@@ -427,14 +432,15 @@ func RunDeepAgent(
 		supHandlers = append(supHandlers, einoSkillMW)
 	}
 	supHandlers = appendEinoChatModelTailMiddlewares(supHandlers, einoChatModelTailConfig{
-		logger:         logger,
-		phase:          "supervisor_orchestrator",
-		summarization:  mainSumMw,
-		modelName:      appCfg.OpenAI.Model,
-		maxTotalTokens: appCfg.OpenAI.MaxTotalTokens,
-		toolMaxBytes:   toolMaxBytesFromMW(&ma.EinoMiddleware),
-		conversationID: conversationID,
-		trace:          modelFacingTrace,
+		logger:           logger,
+		phase:            "supervisor_orchestrator",
+		summarization:    mainSumMw,
+		modelName:        appCfg.OpenAI.Model,
+		maxTotalTokens:   appCfg.OpenAI.MaxTotalTokens,
+		toolMaxBytes:     toolMaxBytesFromMW(&ma.EinoMiddleware),
+		conversationID:   conversationID,
+		trace:            modelFacingTrace,
+		middlewareConfig: &ma.EinoMiddleware,
 	})
 
 	mainToolsCfg := adk.ToolsConfig{
@@ -442,6 +448,7 @@ func RunDeepAgent(
 			Tools:               mainToolsForCfg,
 			UnknownToolsHandler: einomcp.UnknownToolReminderHandler(),
 			ToolCallMiddlewares: []compose.ToolMiddleware{
+				modelOutputExecutionGuardMiddleware(),
 				localToolRBACMiddleware(),
 				hitlToolCallMiddleware(),
 				softRecoveryToolMiddleware(),
@@ -456,10 +463,11 @@ func RunDeepAgent(
 	switch orchMode {
 	case "plan_execute":
 		plannerModelCfg := &einoopenai.ChatModelConfig{
-			APIKey:     appCfg.OpenAI.APIKey,
-			BaseURL:    strings.TrimSuffix(appCfg.OpenAI.BaseURL, "/"),
-			Model:      appCfg.OpenAI.Model,
-			HTTPClient: httpClient,
+			APIKey:              appCfg.OpenAI.APIKey,
+			BaseURL:             strings.TrimSuffix(appCfg.OpenAI.BaseURL, "/"),
+			Model:               appCfg.OpenAI.Model,
+			HTTPClient:          httpClient,
+			MaxCompletionTokens: &maxCompletionTokens,
 		}
 		reasoning.ApplyPlanExecutePlannerModelConfig(plannerModelCfg, &appCfg.OpenAI)
 		peMainModel, perr := einoopenai.NewChatModel(ctx, plannerModelCfg)
@@ -503,14 +511,15 @@ func RunDeepAgent(
 			FilesystemMiddleware: peFsMw,
 			ModelFacingTrace:     modelFacingTrace,
 			PlannerReplannerRewriteHandlers: appendEinoChatModelTailMiddlewares(nil, einoChatModelTailConfig{
-				logger:         logger,
-				phase:          "plan_execute_planner_replanner",
-				summarization:  mainSumMw,
-				modelName:      appCfg.OpenAI.Model,
-				maxTotalTokens: appCfg.OpenAI.MaxTotalTokens,
-				toolMaxBytes:   toolMaxBytesFromMW(&ma.EinoMiddleware),
-				conversationID: conversationID,
-				skipTrace:      true,
+				logger:           logger,
+				phase:            "plan_execute_planner_replanner",
+				summarization:    mainSumMw,
+				modelName:        appCfg.OpenAI.Model,
+				maxTotalTokens:   appCfg.OpenAI.MaxTotalTokens,
+				toolMaxBytes:     toolMaxBytesFromMW(&ma.EinoMiddleware),
+				conversationID:   conversationID,
+				skipTrace:        true,
+				middlewareConfig: &ma.EinoMiddleware,
 			}),
 		})
 		if perr != nil {

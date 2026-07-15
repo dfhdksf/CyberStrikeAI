@@ -192,3 +192,20 @@ func TestClaudeToOpenAIResponseJSON_Thinking(t *testing.T) {
 		t.Fatal()
 	}
 }
+
+func TestConvertOpenAIToClaudeMapsMaxCompletionTokens(t *testing.T) {
+	req, err := convertOpenAIToClaude(map[string]interface{}{
+		"model":                 "claude-test",
+		"max_completion_tokens": float64(16384),
+		"max_tokens":            float64(1024),
+		"messages": []interface{}{
+			map[string]interface{}{"role": "user", "content": "hello"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.MaxTokens != 16384 {
+		t.Fatalf("max tokens=%d, want 16384", req.MaxTokens)
+	}
+}

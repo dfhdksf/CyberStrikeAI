@@ -1,15 +1,15 @@
-# CyberStrikeAI Graph Orchestration Guide
+# CyberStrikeAI Workflows Guide
 
 [中文](../zh-CN/workflow-graph.md)
 
-This document explains how to use **Graph Orchestration**: building workflows on the canvas, configuring node types, passing data between nodes, and binding a graph to a role for automatic execution.
+This document explains how to use **Workflows**: building workflows on the canvas, configuring node types, passing data between nodes, and binding a workflow to a role for automatic execution.
 
 ---
 
-## 1. Where to find Graph Orchestration
+## 1. Where to find Workflows
 
 1. Log in to the CyberStrikeAI web UI.  
-2. Open **Graph Orchestration** in the left sidebar.  
+2. Open **Workflows** in the left sidebar.  
 3. Select an existing workflow from the list, or create a new one.  
 4. Drag nodes, draw edges, and configure properties on the canvas.  
 5. Fill in **ID**, **Name**, and **Description**, then click **Save**.

@@ -111,11 +111,13 @@ func RunEinoSingleChatModelAgent(
 	httpClient = openai.NewEinoHTTPClient(&appCfg.OpenAI, httpClient)
 	openai.AttachSummarizationDiagTransport(httpClient, logger)
 
+	maxCompletionTokens := appCfg.OpenAI.MaxCompletionTokensEffective()
 	baseModelCfg := &einoopenai.ChatModelConfig{
-		APIKey:     appCfg.OpenAI.APIKey,
-		BaseURL:    strings.TrimSuffix(appCfg.OpenAI.BaseURL, "/"),
-		Model:      appCfg.OpenAI.Model,
-		HTTPClient: httpClient,
+		APIKey:              appCfg.OpenAI.APIKey,
+		BaseURL:             strings.TrimSuffix(appCfg.OpenAI.BaseURL, "/"),
+		Model:               appCfg.OpenAI.Model,
+		HTTPClient:          httpClient,
+		MaxCompletionTokens: &maxCompletionTokens,
 	}
 	reasoning.ApplyToEinoChatModelConfig(baseModelCfg, &appCfg.OpenAI, reasoningClient)
 
@@ -146,14 +148,15 @@ func RunEinoSingleChatModelAgent(
 		handlers = append(handlers, einoSkillMW)
 	}
 	handlers = appendEinoChatModelTailMiddlewares(handlers, einoChatModelTailConfig{
-		logger:         logger,
-		phase:          "eino_single",
-		summarization:  mainSumMw,
-		modelName:      appCfg.OpenAI.Model,
-		maxTotalTokens: appCfg.OpenAI.MaxTotalTokens,
-		toolMaxBytes:   toolMaxBytesFromMW(&ma.EinoMiddleware),
-		conversationID: conversationID,
-		trace:          modelFacingTrace,
+		logger:           logger,
+		phase:            "eino_single",
+		summarization:    mainSumMw,
+		modelName:        appCfg.OpenAI.Model,
+		maxTotalTokens:   appCfg.OpenAI.MaxTotalTokens,
+		toolMaxBytes:     toolMaxBytesFromMW(&ma.EinoMiddleware),
+		conversationID:   conversationID,
+		trace:            modelFacingTrace,
+		middlewareConfig: &ma.EinoMiddleware,
 	})
 
 	maxIter := agentMaxIterations(appCfg)
@@ -163,6 +166,7 @@ func RunEinoSingleChatModelAgent(
 			Tools:               mainToolsForCfg,
 			UnknownToolsHandler: einomcp.UnknownToolReminderHandler(),
 			ToolCallMiddlewares: []compose.ToolMiddleware{
+				modelOutputExecutionGuardMiddleware(),
 				localToolRBACMiddleware(),
 				hitlToolCallMiddleware(),
 				softRecoveryToolMiddleware(),
